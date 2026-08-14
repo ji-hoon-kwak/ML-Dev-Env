@@ -60,6 +60,23 @@ VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" →
   `/opt/conda/envs/` (컨테이너 레이어)에 생긴다 — **컨테이너를 rm 하면 사라진다.**
   오래 쓸 env 는 `conda env export > ~/work/envs/<name>.yml` 로 홈에 백업할 것.
 
+## 서비스 스택 공존 (42 = dev 배포 서버 겸용)
+
+같은 호스트에 PIA Scope dev 스택(`piascope-*` 12개 컨테이너: gateway 3100 ·
+scope UI 3401 · ssave 8001/8002 · PG 3120 · Redis 3130 · ES 3140 · MLflow 3150 ·
+MediaMTX 316x · Prometheus 3170 · Milvus 3110/3111)이 상시 기동 중이다.
+
+- 개발자 수칙은 [`docs/ONBOARDING.md`](docs/ONBOARDING.md) §4 — piascope-* 조작 금지 ·
+  prune 금지 · GPU 사용 선언 · 포트 개방 금지 · 호스트에서 compose 직접 실행 금지.
+- **리소스 상한 합계 관리**: `provision_dev.sh` 의 CPUS/MEMORY 기본값 × 인원수가
+  호스트 용량을 넘지 않게 조정할 것 (넘으면 OOM killer 가 ES/Milvus 를 먼저 잡는다).
+- **디스크**: conda env·이미지·실험 산출물이 쌓이면 ES 가 read-only 로 전환된다
+  (watermark 85/90/95%). `df -h` 주기 확인 + 정리는 admin 만
+  (`docker image prune` 은 필터와 함께, `--volumes` 절대 금지).
+- **M3 검증 기간(8/19~8/28)**: 완성 판정에 이 스택이 쓰이므로 GPU 를 실제로 분리
+  운영하는 걸 권장 — 서비스용 GPU 를 정하고 dev 컨테이너를 `gpu-devices` 인자로
+  재발급.
+
 ## 보안 메모 (합의된 트레이드오프)
 
 - **docker 그룹 = 호스트 root 등가.** 개발자 전원이 서로의 컨테이너·호스트에
