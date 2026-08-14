@@ -12,6 +12,10 @@ docker/
 scripts/
   provision_dev.sh    # 온보딩: 계정 생성 + 컨테이너 발급
   deprovision_dev.sh  # 오프보딩: 컨테이너 제거 + 계정 잠금
+docs/
+  REQUEST-ACCESS.md   # 신규 개발자용: SSH 키 발급 + 환경 신청서
+  ONBOARDING.md       # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
+  gpu-allocation.md   # GPU 4장 용도별 분할 정책 (단일 원천)
 ```
 
 3층 구조: **admin(sudo) = 발급·관리 → 개발자 Unix 계정 = SSH 진입점 → 컨테이너 = 실제 작업 환경**
@@ -41,12 +45,13 @@ VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" →
 
 ## GPU 운영 정책
 
-- 현재: 전 컨테이너 `--gpus all` 공유. 충돌 방지는 합의(누가 어느 GPU 로 학습 중인지
-  공유 채널에 선언)로 운영.
-- GPU 경합이 실제로 발생하면: 개발용 GPU 정적 배정 + 학습 전용 GPU 풀 분리로 전환
-  (스크립트는 이미 지원 — 인자만 주면 됨).
-- 격리로 전환할 때 강제는 **컨테이너 레벨**(`--gpus device=N`)에서 한다. 컨테이너 안
+GPU 4장을 **개발 공유(0) · 서비스(1) · 학습 전용(2,3)** 으로 분할한다.
+할당의 단일 원천은 👉 [`docs/gpu-allocation.md`](docs/gpu-allocation.md).
+
+- 격리는 **컨테이너 레벨**(`--gpus device=N`)에서 강제. 컨테이너 안
   `CUDA_VISIBLE_DEVICES` 는 합의일 뿐 강제가 아니다.
+- ⚠️ 현행 dev 컨테이너는 `--gpus all` 로 발급돼 있어 정책과 불일치 — `device=0`
+  으로 재발급 필요 (gpu-allocation.md "전환 메모"). M3 검증 전 서비스 GPU 분리 필수.
 
 ## 이미지 관련 메모
 
