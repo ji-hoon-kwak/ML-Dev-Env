@@ -97,11 +97,12 @@ echo "[ok] 공유 weights 디렉터리 정렬: $WEIGHTS_DIR (그룹=$MLTEAM_GROU
 
 # ---- 3. 개인 이미지 빌드 (UID 를 구워 볼륨 소유권을 맞춘다) ----
 IMAGE="pia/dev-${USERNAME}"
+# USERNAME·UID 만 개발자별로 다르다 → Dockerfile 맨 아래 useradd 레이어만 재빌드되고
+# 무거운 conda 레이어는 캐시 히트(개발자 2번째부터 수 초). MLTEAM_GID 는 고정값.
 docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
-    --build-arg GID="$DEV_GID" \
-    --build-arg GROUPNAME="$MLTEAM_GROUP" \
+    --build-arg MLTEAM_GID="$MLTEAM_GID" \
     "$BASE_IMAGE_DIR"
 echo "[ok] 이미지 빌드: $IMAGE"
 

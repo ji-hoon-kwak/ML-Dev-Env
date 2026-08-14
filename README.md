@@ -65,6 +65,27 @@ GPU 4장을 **개발 공유(0) · 서비스(1) · 학습 전용(2,3)** 으로 �
   `/opt/conda/envs/` (컨테이너 레이어)에 생긴다 — **컨테이너를 rm 하면 사라진다.**
   오래 쓸 env 는 `conda env export > ~/work/envs/<name>.yml` 로 홈에 백업할 것.
 
+### 빌드 캐시 (개발자별 발급이 빨라야 하는 이유)
+
+Dockerfile 은 **개발자 무관 무거운 작업(apt·miniforge·conda)을 위, 개발자별
+`useradd` 를 맨 아래**로 두도록 정렬돼 있다. 덕분에 Docker 레이어 캐시가 개발자
+간에 공유된다(캐시는 이미지 태그가 아니라 레이어 내용으로 키잉된다):
+
+- **첫 개발자**: 캐시가 없어 base pull + conda 설치로 느리다(수 분). 1회성.
+- **두 번째 이후**: 무거운 레이어 전부 `CACHED`, `useradd` 한 줄만 새로 → **수 초**.
+
+확인·주의:
+```bash
+# 두 번째 개발자 빌드 시 무거운 스텝이 CACHED 로 뜨는지 확인
+sudo ./scripts/provision_dev.sh <user2> keys/<user2>.pub 0 2>&1 | grep -i cached
+docker system df                 # Build Cache 크기 확인
+```
+- `environment.yml` 을 바꾸면 conda 레이어부터 다시 빌드된다(의도된 동작).
+- ⚠️ `docker builder prune` / `docker system prune -a` 를 돌리면 이 캐시가 날아가
+  다음 발급이 다시 느려진다 — 서비스 스택 정리할 때도 build cache 는 남길 것.
+- 개발자는 자기 컨테이너 안에서 `pip install`·`conda install` 가능(conda 트리가
+  mlteam group-writable). copy-on-write 라 다른 개발자 컨테이너엔 영향 없다.
+
 ## 서비스 스택 공존 (42 = dev 배포 서버 겸용)
 
 같은 호스트에 PIA Scope dev 스택(`piascope-*` 12개 컨테이너: gateway 3100 ·
