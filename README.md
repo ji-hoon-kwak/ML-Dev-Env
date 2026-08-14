@@ -82,6 +82,32 @@ MediaMTX 316x · Prometheus 3170 · Milvus 3110/3111)이 상시 기동 중이다
   운영하는 걸 권장 — 서비스용 GPU 를 정하고 dev 컨테이너를 `gpu-devices` 인자로
   재발급.
 
+## 그룹·소유권 모델 (mlteam 기본)
+
+신규 개발자 계정의 **기본 그룹(primary group) = `mlteam`** (고정 GID 2000).
+`provision_dev.sh` 가 자동으로:
+- 홈(=워크스페이스)을 `mlteam` 그룹 + setgid 로 → 생성 파일이 mlteam 그룹 상속.
+- `/data/weights` 를 `root:mlteam` `2775` 로 → 팀원 모두 rw, 새 파일도 mlteam 유지.
+- 컨테이너 primary group 을 같은 GID(2000)로 → `/home`·`/weights` bind-mount
+  소유권이 호스트와 정확히 일치.
+
+이유: 예전엔 계정마다 private 그룹이라 공유물이 사실상 admin(root) 소유로만 관리됐다.
+mlteam 을 기본으로 두면 **admin 없이도 팀원끼리 워크스페이스·weight 를 공유·협업**할 수 있다.
+
+⚠️ **오해 방지**: mlteam 은 *파일 공유* 그룹이다. **docker 그룹 = 호스트 root 등가**라는
+사실은 그대로다 — mlteam 으로 바꿔도 권한이 줄지 않는다(권한 축소는 rootless docker 등
+별도 작업, 아래 보안 절).
+
+**기존 계정 정렬**: 스크립트를 다시 돌리면 기존 계정의 primary group 도 mlteam 으로
+맞춰지지만, **이미 만들어둔 파일의 그룹은 그대로**다. 필요하면 한 번 마이그레이션:
+```bash
+sudo find /home/dhkim -not -group mlteam -exec chgrp mlteam {} +   # dhkim 예시
+# dhkim 은 GPU/그룹 정렬을 위해 컨테이너 재발급 권장:
+sudo docker rm -f dev-dhkim && sudo ./scripts/provision_dev.sh dhkim keys/dhkim.pub 0
+```
+공유 write 를 자주 한다면(같은 파일을 여러 명이 수정) 개발자 셸 `umask 002` 를 권장
+(기본 022 는 그룹에 read 만 준다). 서로 다른 파일을 만드는 일반적 경우엔 불필요.
+
 ## 보안 메모 (합의된 트레이드오프)
 
 - **docker 그룹 = 호스트 root 등가.** 개발자 전원이 서로의 컨테이너·호스트에

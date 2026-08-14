@@ -26,10 +26,13 @@ RUN wget -qO /tmp/miniforge.sh \
     && rm /tmp/miniforge.sh
 
 # --- 개발자 계정 (호스트 UID/GID 와 일치시켜 볼륨 파일 소유권을 맞춘다) ---
+# GID/GROUPNAME 은 provision_dev.sh 가 호스트 mlteam 그룹(기본 gid=2000)을 넘긴다.
+# 컨테이너 primary group = mlteam GID → /home·/weights bind-mount 소유권이 호스트와 일치.
 ARG USERNAME=dev
 ARG UID=1000
-ARG GID=1000
-RUN groupadd -g "${GID}" "${USERNAME}" \
+ARG GID=2000
+ARG GROUPNAME=mlteam
+RUN groupadd -g "${GID}" "${GROUPNAME}" \
     && useradd -m -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}" \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-"${USERNAME}" \
     && chmod 440 /etc/sudoers.d/90-"${USERNAME}" \

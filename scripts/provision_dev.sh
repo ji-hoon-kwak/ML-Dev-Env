@@ -17,7 +17,9 @@ set -euo pipefail
 # ---- 팀 공통 설정 (필요 시 수정) ----
 BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
-WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (전 계정 read-write)
+WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
+MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
+MLTEAM_GID="2000"                    # 고정 GID — 호스트·컨테이너·bind-mount 가 같은 번호를 공유
 CPUS="16"
 MEMORY="64g"
 SHM_SIZE="16g"
@@ -47,26 +49,39 @@ if ! ssh-keygen -l -f "$PUBKEY_FILE" >/dev/null 2>&1; then
     exit 1
 fi
 
-# ---- 1. 계정 생성 ----
+# ---- 0. mlteam 공용 그룹 보장 (없으면 고정 GID 로 생성) ----
+if ! getent group "$MLTEAM_GROUP" >/dev/null; then
+    groupadd -g "$MLTEAM_GID" "$MLTEAM_GROUP"
+    echo "[ok] 그룹 생성: $MLTEAM_GROUP (gid=$MLTEAM_GID)"
+else
+    MLTEAM_GID="$(getent group "$MLTEAM_GROUP" | cut -d: -f3)"   # 이미 있으면 그 GID 사용
+fi
+
+# ---- 1. 계정 생성 (기본 그룹 = mlteam) ----
 if id "$USERNAME" &>/dev/null; then
     echo "[skip] 계정 $USERNAME 이미 존재"
+    usermod -g "$MLTEAM_GROUP" "$USERNAME"   # 기본 그룹을 mlteam 으로 정렬(멱등)
 else
-    useradd -m -s /bin/bash "$USERNAME"
+    useradd -m -g "$MLTEAM_GROUP" -s /bin/bash "$USERNAME"
     passwd -l "$USERNAME"   # 비밀번호 로그인 차단 (키 인증만)
-    echo "[ok] 계정 생성: $USERNAME"
+    echo "[ok] 계정 생성: $USERNAME (기본 그룹=$MLTEAM_GROUP)"
 fi
 
 HOME_DIR="$(getent passwd "$USERNAME" | cut -d: -f6)"
 DEV_UID="$(id -u "$USERNAME")"
-DEV_GID="$(id -g "$USERNAME")"
+DEV_GID="$(id -g "$USERNAME")"   # = mlteam GID (기본 그룹이 mlteam 이므로)
+
+# 홈(=워크스페이스) 그룹을 mlteam 으로 + setgid: 이후 생성 파일이 mlteam 그룹을 상속
+chgrp "$MLTEAM_GROUP" "$HOME_DIR"
+chmod g+s "$HOME_DIR"
 
 # ---- SSH 키 등록 ----
-install -d -m 700 -o "$USERNAME" -g "$USERNAME" "$HOME_DIR/.ssh"
+install -d -m 700 -o "$USERNAME" -g "$MLTEAM_GROUP" "$HOME_DIR/.ssh"
 touch "$HOME_DIR/.ssh/authorized_keys"
 if ! grep -qF "$(cat "$PUBKEY_FILE")" "$HOME_DIR/.ssh/authorized_keys"; then
     cat "$PUBKEY_FILE" >> "$HOME_DIR/.ssh/authorized_keys"
 fi
-chown "$USERNAME:$USERNAME" "$HOME_DIR/.ssh/authorized_keys"
+chown "$USERNAME:$MLTEAM_GROUP" "$HOME_DIR/.ssh/authorized_keys"
 chmod 600 "$HOME_DIR/.ssh/authorized_keys"
 echo "[ok] SSH 공개키 등록"
 
@@ -74,12 +89,11 @@ echo "[ok] SSH 공개키 등록"
 usermod -aG docker "$USERNAME"
 echo "[ok] docker 그룹 추가 (주의: 호스트 root 등가 권한)"
 
-# ---- 공유 weights 디렉터리 (전 계정 rw) ----
-if [[ ! -d "$WEIGHTS_DIR" ]]; then
-    mkdir -p "$WEIGHTS_DIR"
-    chmod 2775 "$WEIGHTS_DIR"    # setgid — 새 파일이 그룹 소유 유지
-    echo "[ok] 공유 weights 디렉터리 생성: $WEIGHTS_DIR"
-fi
+# ---- 공유 weights 디렉터리 (mlteam rw 공유) ----
+mkdir -p "$WEIGHTS_DIR"
+chgrp "$MLTEAM_GROUP" "$WEIGHTS_DIR"
+chmod 2775 "$WEIGHTS_DIR"    # rwxrwsr-x — mlteam rw + setgid(새 파일도 mlteam 소유)
+echo "[ok] 공유 weights 디렉터리 정렬: $WEIGHTS_DIR (그룹=$MLTEAM_GROUP)"
 
 # ---- 3. 개인 이미지 빌드 (UID 를 구워 볼륨 소유권을 맞춘다) ----
 IMAGE="pia/dev-${USERNAME}"
@@ -87,6 +101,7 @@ docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
     --build-arg GID="$DEV_GID" \
+    --build-arg GROUPNAME="$MLTEAM_GROUP" \
     "$BASE_IMAGE_DIR"
 echo "[ok] 이미지 빌드: $IMAGE"
 
@@ -102,7 +117,7 @@ if docker inspect "$CONTAINER" &>/dev/null; then
     echo "[skip] 컨테이너 $CONTAINER 이미 존재 — 재발급하려면 먼저:" >&2
     echo "       docker rm -f $CONTAINER" >&2
 else
-    install -d -o "$USERNAME" -g "$USERNAME" "$HOME_DIR/work"
+    install -d -o "$USERNAME" -g "$MLTEAM_GROUP" "$HOME_DIR/work"
     DATASET_MOUNT=()
     if [[ -d "$DATASETS_DIR" ]]; then
         DATASET_MOUNT=(-v "$DATASETS_DIR":/datasets:ro)
@@ -135,7 +150,7 @@ if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
 fi
 # <<< 42-dev-env conda <<<
 EOF
-    chown "$USERNAME:$USERNAME" "$HOME_DIR/.bashrc"
+    chown "$USERNAME:$MLTEAM_GROUP" "$HOME_DIR/.bashrc"
     echo "[ok] ~/.bashrc 에 conda 활성화 snippet 추가"
 fi
 
@@ -148,7 +163,7 @@ cat <<EOF
   VS Code: Remote-SSH 로 호스트 접속 후
            "Dev Containers: Attach to Running Container" → ${CONTAINER}
 
-할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY}
-마운트: 홈=${HOME_DIR} · weights=/weights(rw 공유) · datasets=/datasets(ro)
+할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP}
+마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · datasets=/datasets(ro)
 ※ README 의 GPU 할당 대장에 이 내용을 기록할 것.
 EOF
