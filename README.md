@@ -7,10 +7,12 @@
 
 ```
 docker/
-  Dockerfile        # nvidia/cuda 12.4 + Miniforge(conda) + 개인 계정
+  Dockerfile.base   # pia/dev-base: nvidia/cuda 12.4 + Miniforge(conda) — 무거운 부분, 1회 빌드
+  Dockerfile        # pia/dev-<user>: FROM pia/dev-base + 계정 한 개 (~1초 빌드)
   environment.yml   # 기본 conda env (dev): torch cu124, opencv, ultralytics 등
 scripts/
-  provision_dev.sh    # 온보딩: 계정 생성 + 컨테이너 발급
+  build_base.sh       # pia/dev-base 빌드 (최초 1회 / environment.yml 변경 시)
+  provision_dev.sh    # 온보딩: 계정 생성 + 컨테이너 발급 (base 없으면 자동 빌드)
   deprovision_dev.sh  # 오프보딩: 컨테이너 제거 + 계정 잠금
 docs/
   REQUEST-ACCESS.md   # 신규 개발자용: SSH 키 발급 + 환경 신청서
@@ -65,24 +67,29 @@ GPU 4장을 **개발 공유(0) · 서비스(1) · 학습 전용(2,3)** 으로 �
   `/opt/conda/envs/` (컨테이너 레이어)에 생긴다 — **컨테이너를 rm 하면 사라진다.**
   오래 쓸 env 는 `conda env export > ~/work/envs/<name>.yml` 로 홈에 백업할 것.
 
-### 빌드 캐시 (개발자별 발급이 빨라야 하는 이유)
+### 2단 이미지 (개발자별 발급이 항상 빠른 이유)
 
-Dockerfile 은 **개발자 무관 무거운 작업(apt·miniforge·conda)을 위, 개발자별
-`useradd` 를 맨 아래**로 두도록 정렬돼 있다. 덕분에 Docker 레이어 캐시가 개발자
-간에 공유된다(캐시는 이미지 태그가 아니라 레이어 내용으로 키잉된다):
+이미지를 둘로 나눈다:
+- **`pia/dev-base`** — 무거운 부분(apt·miniforge·conda). `build_base.sh` 로 **1회** 빌드.
+- **`pia/dev-<user>`** — `FROM pia/dev-base` + 계정 한 개. 발급마다 **~1초**.
 
-- **첫 개발자**: 캐시가 없어 base pull + conda 설치로 느리다(수 분). 1회성.
-- **두 번째 이후**: 무거운 레이어 전부 `CACHED`, `useradd` 한 줄만 새로 → **수 초**.
+per-user 빌드가 실재하는 이미지(`pia/dev-base`)에 의존하므로, **build cache 상태와
+무관하게** 항상 빠르다 (레이어 캐시에만 의존하던 예전 방식은 `docker builder prune`
+한 번이면 다음 발급이 다시 수 분이었다).
 
-확인·주의:
+운영:
 ```bash
-# 두 번째 개발자 빌드 시 무거운 스텝이 CACHED 로 뜨는지 확인
-sudo ./scripts/provision_dev.sh <user2> keys/<user2>.pub 0 2>&1 | grep -i cached
-docker system df                 # Build Cache 크기 확인
+# 최초 1회 (또는 environment.yml 변경 시) — 무거운 conda 설치, 수 분
+sudo ./scripts/build_base.sh
+
+# 이후 개발자 발급 — pia/dev-base 위에 useradd 만, ~1초
+sudo ./scripts/provision_dev.sh <user> keys/<user>.pub 0
+#   (pia/dev-base 가 없으면 provision 이 build_base.sh 를 자동 호출한다)
 ```
-- `environment.yml` 을 바꾸면 conda 레이어부터 다시 빌드된다(의도된 동작).
-- ⚠️ `docker builder prune` / `docker system prune -a` 를 돌리면 이 캐시가 날아가
-  다음 발급이 다시 느려진다 — 서비스 스택 정리할 때도 build cache 는 남길 것.
+- `environment.yml` 변경 → `build_base.sh` 재실행. 이후 발급되는 컨테이너에 반영된다
+  (기존 컨테이너는 재발급해야 새 base 를 받는다).
+- ⚠️ `docker image prune -a` 는 컨테이너가 직접 쓰지 않는 `pia/dev-base` 태그를 지울 수
+  있다. 지워져도 다음 발급 때 자동 재빌드되지만(레이어 캐시 있으면 빠름), 되도록 남길 것.
 - 개발자는 자기 컨테이너 안에서 `pip install`·`conda install` 가능(conda 트리가
   mlteam group-writable). copy-on-write 라 다른 개발자 컨테이너엔 영향 없다.
 

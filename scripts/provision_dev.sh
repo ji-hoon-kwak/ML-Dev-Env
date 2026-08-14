@@ -95,16 +95,21 @@ chgrp "$MLTEAM_GROUP" "$WEIGHTS_DIR"
 chmod 2775 "$WEIGHTS_DIR"    # rwxrwsr-x — mlteam rw + setgid(새 파일도 mlteam 소유)
 echo "[ok] 공유 weights 디렉터리 정렬: $WEIGHTS_DIR (그룹=$MLTEAM_GROUP)"
 
-# ---- 3. 개인 이미지 빌드 (UID 를 구워 볼륨 소유권을 맞춘다) ----
+# ---- 3. base 이미지 보장 + 개인 이미지 빌드 ----
+# pia/dev-base(무거운 conda)가 없으면 최초 1회 빌드. 이후 개발자별 이미지는
+# 그 위에 useradd 한 줄만 얹으므로 ~1초에 끝난다(build cache 유무와 무관).
+if ! docker image inspect pia/dev-base &>/dev/null; then
+    echo "[..] pia/dev-base 없음 — 최초 1회 빌드"
+    "$(dirname "${BASH_SOURCE[0]}")/build_base.sh"
+fi
+
 IMAGE="pia/dev-${USERNAME}"
-# USERNAME·UID 만 개발자별로 다르다 → Dockerfile 맨 아래 useradd 레이어만 재빌드되고
-# 무거운 conda 레이어는 캐시 히트(개발자 2번째부터 수 초). MLTEAM_GID 는 고정값.
 docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
-    --build-arg MLTEAM_GID="$MLTEAM_GID" \
+    -f "$BASE_IMAGE_DIR/Dockerfile" \
     "$BASE_IMAGE_DIR"
-echo "[ok] 이미지 빌드: $IMAGE"
+echo "[ok] 이미지 빌드: $IMAGE (FROM pia/dev-base)"
 
 # ---- 4. 컨테이너 실행 ----
 CONTAINER="dev-${USERNAME}"

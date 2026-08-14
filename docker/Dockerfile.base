@@ -1,0 +1,44 @@
+# pia/dev-base — 개발자 공용 베이스 이미지 (무거운 부분 전부).
+#
+# admin 이 scripts/build_base.sh 로 **딱 한 번** 빌드한다
+# (environment.yml 이 바뀔 때만 다시). 개발자별 이미지는 이 위에 useradd 한 줄만
+# 얹으므로 발급이 항상 수 초에 끝난다 — build cache 유무와 무관하게.
+#
+# 환경 관리자는 conda (팀 합의 2026-08-14). Anaconda 본사 리포 상용 라이선스
+# 이슈를 피하기 위해 Miniforge(conda-forge 기본)를 쓴다.
+
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- OS 패키지 ---
+# libgl1/libglib2.0-0: opencv-python 이 headless 서버에서 import 되려면 필요
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sudo git wget curl ca-certificates openssh-client \
+        libgl1 libglib2.0-0 tmux htop vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Miniforge (conda) ---
+RUN wget -qO /tmp/miniforge.sh \
+        "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
+    && bash /tmp/miniforge.sh -b -p /opt/conda \
+    && rm /tmp/miniforge.sh
+
+# --- mlteam 그룹 + 기본 conda env (dev) ---
+# MLTEAM_GID 는 호스트 mlteam GID 와 맞춘다(build_base.sh 가 주입). conda 트리를
+# root:mlteam + group-writable 로 두면 mlteam 소속 개발자가 자기 컨테이너 안에서
+# pip/conda install 가능(copy-on-write 라 다른 개발자에겐 영향 없음).
+ARG MLTEAM_GID=2000
+COPY environment.yml /opt/project/environment.yml
+RUN groupadd -g "${MLTEAM_GID}" mlteam \
+    && /opt/conda/bin/conda env create -f /opt/project/environment.yml \
+    && /opt/conda/bin/conda clean -afy \
+    && chown -R root:"${MLTEAM_GID}" /opt/conda \
+    && chmod -R g+w /opt/conda \
+    && mkdir -p /workspace && chown root:"${MLTEAM_GID}" /workspace && chmod 2775 /workspace
+
+# 홈은 호스트 볼륨으로 덮이므로 이미지의 ~/.bashrc conda init 은 무효.
+# 활성화는 (a) 아래 PATH 기본값 + (b) provision_dev.sh 의 호스트 ~/.bashrc snippet.
+ENV PATH=/opt/conda/envs/dev/bin:/opt/conda/bin:$PATH
+
+CMD ["sleep", "infinity"]
