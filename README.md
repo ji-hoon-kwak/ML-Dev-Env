@@ -7,8 +7,8 @@
 
 ```
 docker/
-  Dockerfile        # 개발자별 이미지 (company/ai-dev:1.0 + uv 환경 + 개인 계정)
-  pyproject.toml    # 공통 Python 의존성 (torch cu124 인덱스 포함)
+  Dockerfile        # nvidia/cuda 12.4 + Miniforge(conda) + 개인 계정
+  environment.yml   # 기본 conda env (dev): torch cu124, opencv, ultralytics 등
 scripts/
   provision_dev.sh    # 온보딩: 계정 생성 + 컨테이너 발급
   deprovision_dev.sh  # 오프보딩: 컨테이너 제거 + 계정 잠금
@@ -16,44 +16,49 @@ scripts/
 
 3층 구조: **admin(sudo) = 발급·관리 → 개발자 Unix 계정 = SSH 진입점 → 컨테이너 = 실제 작업 환경**
 
+팀 합의 (2026-08-14):
+- 환경 관리자는 **conda** (Miniforge — Anaconda 리포 상용 라이선스 이슈 회피).
+  기본 env `dev` 제공, 개발자가 자기 env 추가 자유 (`/opt/conda` 본인 소유).
+- **weights 는 전 계정 공유**: 호스트 `/data/weights` → 컨테이너 `/weights` (rw).
+- **GPU 는 일단 전체 공유** (`--gpus all` 기본). 분리가 필요해지면 발급 시
+  `gpu-devices` 인자로 제한 가능 — 재발급(`docker rm -f dev-<user>` 후 재실행)만 하면 됨.
+- 접속은 비밀번호 없이 **SSH 공개키만** (계정 비밀번호는 잠금 상태).
+
 ## 온보딩 (admin이 42 서버에서)
 
 ```bash
 # 개발자에게 SSH 공개키를 받아서:
-sudo ./scripts/provision_dev.sh jhkwak ./keys/jhkwak.pub 0     # GPU 0번 할당
-sudo ./scripts/provision_dev.sh mkim   ./keys/mkim.pub   2,3   # GPU 2,3번 할당
+sudo ./scripts/provision_dev.sh dhkim keys/dhkim.pub        # GPU 전체 공유 (기본)
+sudo ./scripts/provision_dev.sh mkim  keys/mkim.pub  2,3    # 특정 GPU 만
 ```
 
 개발자 접속 동선:
 
 ```
-ssh jhkwak@<42서버>  →  docker exec -it dev-jhkwak bash
-VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" → dev-jhkwak
+ssh dhkim@<42서버>  →  docker exec -it dev-dhkim bash   (conda dev env 자동 활성화)
+VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" → dev-dhkim
 ```
 
-## GPU 할당 대장
+## GPU 운영 정책
 
-| GPU | 용도 | 할당 | 비고 |
-|-----|------|------|------|
-| 0   | 개발 |      |      |
-| 1   | 개발 |      |      |
-| ... |      |      |      |
-| 6,7 | **학습 전용** | (컨테이너에 노출 금지) | 학습 잡 실행 시에만 `docker run --rm --gpus '"device=6,7"' ...` |
-
-- 격리는 **컨테이너 레벨**(`--gpus device=N`)에서 강제한다. 컨테이너 안
+- 현재: 전 컨테이너 `--gpus all` 공유. 충돌 방지는 합의(누가 어느 GPU 로 학습 중인지
+  공유 채널에 선언)로 운영.
+- GPU 경합이 실제로 발생하면: 개발용 GPU 정적 배정 + 학습 전용 GPU 풀 분리로 전환
+  (스크립트는 이미 지원 — 인자만 주면 됨).
+- 격리로 전환할 때 강제는 **컨테이너 레벨**(`--gpus device=N`)에서 한다. 컨테이너 안
   `CUDA_VISIBLE_DEVICES` 는 합의일 뿐 강제가 아니다.
-- 학습 전용 GPU 는 어떤 개발 컨테이너에도 노출하지 않는다.
 
-## 첫 이미지 빌드 전 확인
+## 이미지 관련 메모
 
-1. `company/ai-dev:1.0` 이 Ubuntu 계열 + CUDA 런타임인지, uv 내장 여부 확인
-   (내장이면 Dockerfile 의 `COPY --from=ghcr.io/astral-sh/uv` 줄 삭제).
-2. 서버 CUDA 버전에 맞게 `docker/pyproject.toml` 의 `cu124` 인덱스 조정.
-3. 최초 빌드 후 컨테이너 안 `/opt/project/uv.lock` 을 꺼내 `docker/` 에 커밋
-   → 이후 빌드 재현성 확보:
-   ```bash
-   docker cp dev-<user>:/opt/project/uv.lock docker/uv.lock
-   ```
+- 베이스는 `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04` (Docker Hub 공개 이미지).
+  서버 드라이버가 지원하는 CUDA 버전 확인: `nvidia-smi` 우상단 "CUDA Version" ≥ 12.4.
+  낮으면 Dockerfile 의 태그와 `environment.yml` 의 `cu124` 를 함께 내릴 것.
+- conda 활성화: 홈이 호스트 볼륨으로 덮여서 이미지에 구운 `~/.bashrc` 는 무효.
+  provision 스크립트가 **호스트 ~/.bashrc 에 guarded snippet** 을 넣는다
+  (`/opt/conda` 존재할 때만 발동 → 호스트 셸에는 영향 없음).
+- 컨테이너 자체 레이어에 conda env 를 굽는 대신 개발자가 추가로 만드는 env 는
+  `/opt/conda/envs/` (컨테이너 레이어)에 생긴다 — **컨테이너를 rm 하면 사라진다.**
+  오래 쓸 env 는 `conda env export > ~/work/envs/<name>.yml` 로 홈에 백업할 것.
 
 ## 보안 메모 (합의된 트레이드오프)
 
@@ -68,10 +73,12 @@ VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" →
 - `ultralytics` 는 **AGPL-3.0** — 서비스 리포 CLAUDE.md §10 기준 Enterprise
   License / Roboflow sub-license 전제. 개발 환경 포함은 문제없으나 배포물에
   섞일 때 조건 확인.
+- conda 는 Miniforge + conda-forge 채널만 사용 (Anaconda `defaults` 채널은
+  상용 조직 유료 — 실수로 `-c defaults` 쓰지 않기).
 
 ## 다음 단계 (합의된 로드맵)
 
 1. ✅ 계정 분리 + 개발자별 컨테이너 + VS Code attach (이 리포)
 2. `.devcontainer/devcontainer.json` 을 서비스 리포에 추가해 attach 후 확장/설정 자동화
-3. GPU 풀 분리 운영 (개발용 정적 할당 / 학습 전용) + DCGM-exporter 모니터링
+3. GPU 경합 발생 시 개발/학습 GPU 풀 분리 + DCGM-exporter 모니터링
 4. 학습 잡 대기가 병목이 되면 스케줄러(Slurm/Ray) 도입 검토

@@ -1,0 +1,16 @@
+# 기본 dev 환경. 개발자는 이걸 그대로 쓰거나 conda create 로 자기 env 를 추가.
+name: dev
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - pandas
+  - pip
+  - pip:
+      # torch CUDA 빌드 명시 (서버 CUDA 12.4 기준 — 드라이버에 맞게 조정)
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch
+      - torchvision
+      - opencv-python
+      - ultralytics
