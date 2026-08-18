@@ -7,14 +7,23 @@
 
 ## 1. 최초 1회 설정
 
-로컬 `~/.ssh/config` 에 추가:
+로컬 `~/.ssh/config` 에 **아래 블록을 그대로** 추가한다 (계정명만 치환).
+⚠️ 별칭은 `gpu42` 로 통일할 것 — `tmp`·`TRACE_SSAVE_MK` 처럼 제각각 지으면
+나중에 서로 도와주기 어렵고 오타로 접속이 깨진다.
 
 ```
 Host gpu42
-    HostName <42서버주소>
-    User <본인계정>            # 예: dhkim
+    HostName 10.128.30.42
+    User <본인계정>            # 예: dhkim  (반드시 본인 계정)
     IdentityFile ~/.ssh/id_ed25519
 ```
+
+- **HostName 은 반드시 실제 IP** (`10.128.30.42`). 이 줄이 없거나 틀리면 ssh 가
+  별칭 문자열을 호스트명으로 착각해 `Could not resolve hostname` 로 죽는다.
+- macOS 에서 키에 passphrase 가 있으면 매번 안 묻게 keychain 에 한 번 등록:
+  ```bash
+  ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+  ```
 
 접속 확인:
 
@@ -69,5 +78,34 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 
 ## 문제 발생 시
 
+### 접속이 안 됨 (비밀번호를 묻거나 permission denied)
+
+거의 항상 **본인 맥의 `~/.ssh/config` 문제**다 (계정은 비밀번호가 잠겨 있어 비번
+프롬프트가 뜨면 무조건 실패한다 = 키 인증이 안 먹은 것). 서버가 아니라 **접속하는
+쪽**을 먼저 의심한다.
+
+**자가진단 — config 를 통째로 무시하고 붙어본다:**
+```bash
+ssh -F /dev/null -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
+```
+- **이게 되면** → 서버·계정·키는 정상. 범인은 100% 로컬 `~/.ssh/config` 별칭.
+  §1 표준 블록으로 `Host gpu42` 를 다시 만들고 `ssh gpu42` 로 재시도.
+- **이것도 안 되면** → 키/계정 문제. 아래 순서로 확인:
+  ```bash
+  ls -l ~/.ssh/id_ed25519                         # 없으면 키가 없는 것
+  chmod 600 ~/.ssh/id_ed25519                      # 권한 640/644 면 SSH 가 키를 무시함
+  ssh-keygen -lf ~/.ssh/id_ed25519.pub             # 이 지문을 admin 이 서버 등록분과 대조
+  ```
+  지문이 서버 등록분과 다르면 admin 에게 올바른 `.pub` 재등록 요청.
+
+**흔한 config 함정** (`ssh -G gpu42` 로 최종값 확인):
+- `hostname` 이 별칭과 같게 나옴 → `HostName` 줄 누락/오타.
+- `user` 가 본인이 아님, `identityfile` 이 엉뚱함 → 위쪽 `Host *` 블록이 값을
+  가로챈 것(먼저 매칭된 블록이 이김). 그 블록을 고치거나 gpu42 블록을 위로 옮긴다.
+
+### 그 외
+
 - 컨테이너가 죽어 있음: `ssh gpu42` 후 `docker start dev-<계정>` (재부팅 후 자동 시작이 안 됐을 때)
+- 첫 Remote-SSH 접속이 오래 걸림: VS Code 확장(Python·Jupyter) 최초 설치 중 —
+  멈춘 게 아니니 기다린다. 두 번째부터는 즉시 붙는다.
 - 그 외: admin(@jhkwak) 에게. 컨테이너 재발급은 홈 데이터를 건드리지 않는다.
