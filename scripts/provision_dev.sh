@@ -18,6 +18,7 @@ set -euo pipefail
 BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
 WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
+LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · read-only 마운트, admin 관리)
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID — 호스트·컨테이너·bind-mount 가 같은 번호를 공유
 CPUS="16"
@@ -95,6 +96,12 @@ chgrp "$MLTEAM_GROUP" "$WEIGHTS_DIR"
 chmod 2775 "$WEIGHTS_DIR"    # rwxrwsr-x — mlteam rw + setgid(새 파일도 mlteam 소유)
 echo "[ok] 공유 weights 디렉터리 정렬: $WEIGHTS_DIR (그룹=$MLTEAM_GROUP)"
 
+# ---- 공유 라이브러리 디렉터리 (admin 관리 · 컨테이너엔 read-only 마운트) ----
+mkdir -p "$LIBS_DIR"
+chgrp "$MLTEAM_GROUP" "$LIBS_DIR"
+chmod 2775 "$LIBS_DIR"       # 호스트: admin/mlteam 이 관리. 컨테이너: :ro 로 읽기 전용
+echo "[ok] 공유 라이브러리 디렉터리 정렬: $LIBS_DIR (그룹=$MLTEAM_GROUP)"
+
 # ---- 3. base 이미지 보장 + 개인 이미지 빌드 ----
 # pia/dev-base(무거운 conda)가 없으면 최초 1회 빌드. 이후 개발자별 이미지는
 # 그 위에 useradd 한 줄만 얹으므로 ~1초에 끝난다(build cache 유무와 무관).
@@ -137,6 +144,7 @@ else
         --label "owner=${USERNAME}" \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
+        -v "$LIBS_DIR":/libs:ro \
         "${DATASET_MOUNT[@]}" \
         -w "/home/${USERNAME}/work" \
         "$IMAGE"
@@ -170,6 +178,6 @@ cat <<EOF
            "Dev Containers: Attach to Running Container" → ${CONTAINER}
 
 할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP}
-마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · datasets=/datasets(ro)
+마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro)
 ※ README 의 GPU 할당 대장에 이 내용을 기록할 것.
 EOF

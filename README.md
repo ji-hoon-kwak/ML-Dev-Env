@@ -26,6 +26,8 @@ docs/
 - 환경 관리자는 **conda** (Miniforge — Anaconda 리포 상용 라이선스 이슈 회피).
   기본 env `dev` 제공, 개발자가 자기 env 추가 자유 (`/opt/conda` 본인 소유).
 - **weights 는 전 계정 공유**: 호스트 `/data/weights` → 컨테이너 `/weights` (rw).
+- **공유 AI 라이브러리**: 호스트 `/data/libs` → 컨테이너 `/libs` (**read-only**, admin 관리).
+  개인 홈에 둔 공유 자산(예: QFE)은 여기로 옮긴다 — 홈에서 공유하면 안 된다(§ 아래).
 - **GPU 는 일단 전체 공유** (`--gpus all` 기본). 분리가 필요해지면 발급 시
   `gpu-devices` 인자로 제한 가능 — 재발급(`docker rm -f dev-<user>` 후 재실행)만 하면 됨.
 - 접속은 비밀번호 없이 **SSH 공개키만** (계정 비밀번호는 잠금 상태).
@@ -109,6 +111,33 @@ MediaMTX 316x · Prometheus 3170 · Milvus 3110/3111)이 상시 기동 중이다
 - **M3 검증 기간(8/19~8/28)**: 완성 판정에 이 스택이 쓰이므로 GPU 를 실제로 분리
   운영하는 걸 권장 — 서비스용 GPU 를 정하고 dev 컨테이너를 `gpu-devices` 인자로
   재발급.
+
+## 공유 자산은 홈이 아니라 공용 경로에 (`/data/*`)
+
+개인 홈(admin 포함)에 둔 자산은 다른 개발자·컨테이너가 접근할 수 없다 — 홈은 권한이
+막혀 있고 남의 홈은 컨테이너에 마운트되지 않는다. 공유해야 할 자산은 `/data/` 아래
+공용 경로로 옮기고 컨테이너에 마운트한다:
+
+| 호스트 | 컨테이너 | 성격 | 소유/권한 |
+|---|---|---|---|
+| `/data/weights` | `/weights` | 모델 weight (전원 rw) | `root:mlteam` 2775 |
+| `/data/libs` | `/libs` (**ro**) | AI 라이브러리(QFE 등, admin 관리) | `root:mlteam` 2775, 컨테이너선 :ro |
+| `/data/datasets` | `/datasets` (ro) | 데이터셋 | 읽기 전용 |
+
+**예: admin 홈의 `QFE_v1.1.3` 를 공유로 이관** (admin 이 1회):
+```bash
+sudo mkdir -p /data/libs
+sudo mv ~/QFE_v1.1.3 /data/libs/
+sudo chown -R root:mlteam /data/libs/QFE_v1.1.3
+sudo chmod -R g+rX /data/libs/QFE_v1.1.3        # mlteam 읽기+디렉터리 진입
+# 기존 컨테이너는 재발급해야 /libs 마운트가 붙는다(마운트는 실행 중 추가 불가):
+#   sudo docker rm -f dev-<user> && sudo ./scripts/provision_dev.sh <user> keys/<user>.pub <gpu>
+```
+개발자는 컨테이너 안에서 `/libs/QFE_v1.1.3` 로 접근(읽기 전용). import 는 PYTHONPATH
+또는 자기 env 에 `pip install -e` (상세: `docs/ONBOARDING.md` §3).
+
+> ⚠️ 마운트는 **컨테이너 생성 시점에만** 추가된다. `/data/libs` 를 새로 만들었으면
+> 기존 컨테이너들은 **재발급**해야 `/libs` 가 보인다(홈은 bind-mount 라 코드는 보존).
 
 ## 그룹·소유권 모델 (mlteam 기본)
 

@@ -49,6 +49,7 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 | `/home/<계정>` | 호스트 홈과 동일 (영속 — 컨테이너가 재발급돼도 유지) |
 | `/home/<계정>/work` | 작업 디렉터리 (여기서 작업) |
 | `/weights` | 공유 모델 weight (전 계정 읽기/쓰기) |
+| `/libs` | 공유 AI 라이브러리 (QFE 등 · **읽기 전용** · admin 관리) |
 | `/datasets` | 공유 데이터셋 (읽기 전용) |
 | conda | 기본 env `dev` 자동 활성화 · `conda create` 로 자기 env 추가 자유 |
 
@@ -56,6 +57,10 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 - 추가로 만든 conda env 는 컨테이너 재발급 시 사라진다 → 오래 쓸 env 는
   `conda env export -n <이름> > ~/work/envs/<이름>.yml` 로 홈에 백업.
 - git 설정(`~/.gitconfig`)·SSH 키는 홈에 있으므로 컨테이너 안에서 그대로 동작.
+- `/libs` 공유 라이브러리(예: `/libs/QFE_v1.1.3`)는 읽기 전용이다. import 하려면
+  `export PYTHONPATH=/libs/QFE_v1.1.3:$PYTHONPATH` 또는 자기 conda env 에
+  `pip install -e /libs/QFE_v1.1.3` (editable 설치가 소스에 쓰기를 요구해 실패하면
+  `~/work` 로 복사해서 설치). 공유본 수정이 필요하면 admin 에게.
 
 ## 4. ⚠️ 공용 서버 수칙 (필독)
 
