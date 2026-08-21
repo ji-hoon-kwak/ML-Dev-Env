@@ -1,0 +1,22 @@
+# pia/pf-<user> — 플랫폼 개발자별 얇은 이미지.
+#
+# pia/pf-base(python + node, GPU/torch 없음) 위에 계정 한 개만 얹는다 → 빌드 ~1초.
+# provision_platform.sh 가 개발자별 UID 를 넣어 빌드한다:
+#   docker build -t pia/pf-<user> \
+#     --build-arg USERNAME=<user> --build-arg UID=<uid> \
+#     -f docker/Dockerfile.platform docker/
+#
+# ⚠️ pia/pf-base 가 먼저 존재해야 한다 (scripts/build_platform_base.sh · provision 이 자동 확인).
+
+FROM pia/pf-base
+
+# primary group = mlteam (base 에서 생성) → /home·/weights bind-mount 소유권이 호스트와 일치.
+ARG USERNAME=dev
+ARG UID=1000
+RUN useradd -m -u "${UID}" -g mlteam -s /bin/bash "${USERNAME}" \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-"${USERNAME}" \
+    && chmod 440 /etc/sudoers.d/90-"${USERNAME}"
+
+USER ${USERNAME}
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

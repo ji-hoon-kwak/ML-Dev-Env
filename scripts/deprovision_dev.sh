@@ -17,8 +17,6 @@ fi
 
 USERNAME="$1"
 DELETE_ACCOUNT="${2:-}"
-CONTAINER="dev-${USERNAME}"
-IMAGE="pia/dev-${USERNAME}"
 
 if ! id "$USERNAME" &>/dev/null; then
     echo "ERROR: 계정 없음: $USERNAME" >&2
@@ -26,8 +24,13 @@ if ! id "$USERNAME" &>/dev/null; then
 fi
 HOME_DIR="$(getent passwd "$USERNAME" | cut -d: -f6)"
 
-docker rm -f "$CONTAINER" 2>/dev/null && echo "[ok] 컨테이너 제거: $CONTAINER" || echo "[skip] 컨테이너 없음"
-docker rmi "$IMAGE" 2>/dev/null && echo "[ok] 이미지 제거: $IMAGE" || echo "[skip] 이미지 없음"
+# 접두사(ml-=AI · pf-=플랫폼 · dev-=레거시) 무엇이든 존재하는 컨테이너/이미지 제거
+for PREFIX in ml pf dev; do
+    CONTAINER="${PREFIX}-${USERNAME}"
+    IMAGE="pia/${PREFIX}-${USERNAME}"
+    docker rm -f "$CONTAINER" 2>/dev/null && echo "[ok] 컨테이너 제거: $CONTAINER" || true
+    docker rmi "$IMAGE" 2>/dev/null && echo "[ok] 이미지 제거: $IMAGE" || true
+done
 
 # SSH 접근 차단
 if [[ -f "$HOME_DIR/.ssh/authorized_keys" ]]; then

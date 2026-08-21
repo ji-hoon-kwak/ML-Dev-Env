@@ -5,20 +5,38 @@
 
 ## 구조
 
+두 종류의 개발 컨테이너가 있다 (역할별 접두사로 구분):
+
+| 역할 | 접두사 | 이미지 base | 특징 | 발급 스크립트 |
+|---|---|---|---|---|
+| **AI(ML)** | `ml-<user>` | `pia/dev-base` | GPU + CUDA + torch + 모델 wheel | `provision_dev.sh` |
+| **플랫폼(BE/FE)** | `pf-<user>` | `pia/pf-base` | **GPU/torch 없음** · python + **node** · 서비스 네트워크 연결 | `provision_platform.sh` |
+
 ```
 docker/
-  Dockerfile.base   # pia/dev-base: nvidia/cuda 12.4 + Miniforge(conda) — 무거운 부분, 1회 빌드
-  Dockerfile        # pia/dev-<user>: FROM pia/dev-base + 계정 한 개 (~1초 빌드)
-  environment.yml   # 기본 conda env (dev): torch cu124, opencv, ultralytics 등
+  Dockerfile.base            # pia/dev-base: nvidia/cuda 12.4 + Miniforge + torch (AI, 무거움)
+  Dockerfile                 # pia/ml-<user>: FROM pia/dev-base + 계정 (~1초)
+  environment.yml            # AI conda env: torch cu124, opencv, ultralytics 등
+  Dockerfile.platform-base   # pia/pf-base: ubuntu + Miniforge + node (플랫폼, GPU/torch 없음)
+  Dockerfile.platform        # pia/pf-<user>: FROM pia/pf-base + 계정 (~1초)
+  environment.platform.yml   # 플랫폼 conda env: python + nodejs + fastapi/uvicorn
 scripts/
-  build_base.sh       # pia/dev-base 빌드 (최초 1회 / environment.yml 변경 시)
-  provision_dev.sh    # 온보딩: 계정 생성 + 컨테이너 발급 (base 없으면 자동 빌드)
-  deprovision_dev.sh  # 오프보딩: 컨테이너 제거 + 계정 잠금
+  build_base.sh            # pia/dev-base 빌드 (AI · 최초 1회 / environment.yml 변경 시)
+  build_platform_base.sh   # pia/pf-base 빌드 (플랫폼 · 최초 1회 / environment.platform.yml 변경 시)
+  provision_dev.sh         # AI(ml-) 온보딩: 계정 + GPU 컨테이너 (base 없으면 자동 빌드)
+  provision_platform.sh    # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 서비스망 연결
+  deprovision_dev.sh       # 오프보딩: ml-/pf-/dev- 컨테이너·이미지 제거 + 계정 잠금
 docs/
   REQUEST-ACCESS.md   # 신규 개발자용: SSH 키 발급 + 환경 신청서
   ONBOARDING.md       # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
   gpu-allocation.md   # GPU 4장 용도별 분할 정책 (단일 원천)
 ```
+
+**AI vs 플랫폼 — 왜 이미지가 다른가**: AI 개발자는 모델을 GPU 에서 직접 돌리므로
+torch/CUDA/GPU 가 필수다. 플랫폼(gateway/FE)은 모델을 안 돌리고 **AI 서비스를 HTTP 로
+호출**할 뿐이라 GPU·torch 가 불필요하고, 대신 FE 용 **Node.js** 가 필요하다. 그래서
+플랫폼은 CUDA 없는 경량 base(`pia/pf-base`) + GPU 미할당으로 발급한다(놀리는 GPU 점유
+방지). 상세는 [`docs/platform-dev.md`](docs/platform-dev.md).
 
 3층 구조: **admin(sudo) = 발급·관리 → 개발자 Unix 계정 = SSH 진입점 → 컨테이너 = 실제 작업 환경**
 
@@ -35,9 +53,12 @@ docs/
 ## 온보딩 (admin이 42 서버에서)
 
 ```bash
-# 개발자에게 SSH 공개키를 받아서:
+# AI(ML) 개발자 — GPU 컨테이너 ml-<user>
 sudo ./scripts/provision_dev.sh dhkim keys/dhkim.pub        # GPU 전체 공유 (기본)
 sudo ./scripts/provision_dev.sh mkim  keys/mkim.pub  2,3    # 특정 GPU 만
+
+# 플랫폼(BE/FE) 개발자 — GPU 없는 컨테이너 pf-<user> (+ 서비스 네트워크 연결)
+sudo ./scripts/provision_platform.sh jihoon keys/jihoon.pub
 ```
 
 개발자 접속 동선:

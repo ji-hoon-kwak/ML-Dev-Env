@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 42 서버 개발자 온보딩: 계정 생성 + 개인 dev 컨테이너 발급.
+# 42 서버 AI(ML) 개발자 온보딩: 계정 생성 + 개인 ml 컨테이너 발급.
+#   ⭐ 컨테이너 접두사 = ml-  (GPU·torch 있는 AI 개발용). 플랫폼(BE/FE)은 provision_platform.sh(pf-).
 #
 # 사용법 (42 서버에서 admin/sudo 로 실행):
 #   sudo ./provision_dev.sh <username> <pubkey-file> [gpu-devices]
@@ -9,8 +10,8 @@
 # 하는 일:
 #   1. Unix 계정 생성 (비밀번호 잠금, SSH 키 인증만)
 #   2. docker 그룹 추가 (⚠️ 호스트 root 등가 — README 의 보안 절 참조)
-#   3. 개발자 UID 로 이미지 빌드 (pia/dev-<user>)
-#   4. GPU·리소스 제한 걸린 컨테이너 dev-<user> 실행 (홈 + weights + datasets 마운트)
+#   3. 개발자 UID 로 이미지 빌드 (pia/ml-<user>, base=pia/dev-base)
+#   4. GPU·리소스 제한 걸린 컨테이너 ml-<user> 실행 (홈 + weights + datasets 마운트)
 #   5. 호스트 ~/.bashrc 에 conda 활성화 snippet 추가 (컨테이너 안에서만 동작)
 set -euo pipefail
 
@@ -18,6 +19,17 @@ set -euo pipefail
 BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
 WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
+FACE_LICENSE_SRC="/data/libs/qfe_home/data.conf"                     # Suprema 활성화 단일 원본(mlteam 공유). gpuadmin 이 share_license.sh export 로 여기에 심는다. gpuadmin 홈(0750)에 직접 물리면 권한·재활성화에 취약하므로 공유 경로를 단일 원천으로 둔다.
+FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이너 $HOME 기준 — SDK가 읽는 위치
+# ⭐ 얼굴 SDK 소비자(trace-worker·dev 파이프라인)는 라이선스 파일이 아니라 QFE HTTP wrapper URL 만
+#    필요하다 (ADR-023 · identity.yaml: endpoint=${SUPREMA_ENDPOINT}). QFE 는 노드락이라 컨테이너 안
+#    직접 초기화가 안 되고, 42 로컬 호스트에서 qfe_http_server 를 하나 띄운 뒤 그 주소를 여기 넣으면
+#    모든 dev 컨테이너가 같은 라이선스를 HTTP 로 공유한다. 42 서버 기본값을 여기 박아둔다 —
+#    이 스크립트는 42 전용 프로비저너라 원칙4(URL 하드코딩 금지)의 실무 예외로 둔다(top-of-file 상수).
+#    필요 시 `SUPREMA_ENDPOINT_URL=... sudo -E ./provision_dev.sh ...` 로 오버라이드, 빈 문자열이면
+#    주입 생략(identity off — 추적은 계속). 아래 docker run 이 --add-host 로 host.docker.internal 매핑.
+#    배경·실행순서 = docs/suprema-license-sharing.md §실행계획.
+SUPREMA_ENDPOINT_URL="${SUPREMA_ENDPOINT_URL:-http://host.docker.internal:18080}"
 LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · read-only 마운트, admin 관리)
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID — 호스트·컨테이너·bind-mount 가 같은 번호를 공유
@@ -96,6 +108,15 @@ chgrp "$MLTEAM_GROUP" "$WEIGHTS_DIR"
 chmod 2775 "$WEIGHTS_DIR"    # rwxrwsr-x — mlteam rw + setgid(새 파일도 mlteam 소유)
 echo "[ok] 공유 weights 디렉터리 정렬: $WEIGHTS_DIR (그룹=$MLTEAM_GROUP)"
 
+# ---- Suprema 얼굴 SDK 라이선스: mlteam 읽기 허용 (모든 dev 컨테이너 공통) ----
+if [[ -f "$FACE_LICENSE_SRC" ]]; then
+    chgrp "$MLTEAM_GROUP" "$FACE_LICENSE_SRC" 2>/dev/null || true
+    chmod g+r "$FACE_LICENSE_SRC"     # 그룹 읽기만(world-read 금지 — 라이선스 키 보호)
+    echo "[ok] Suprema 라이선스 mlteam 읽기 허용: $FACE_LICENSE_SRC"
+else
+    echo "[warn] Suprema 라이선스 없음: $FACE_LICENSE_SRC — 얼굴 SDK 마운트 생략"
+fi
+
 # ---- 공유 라이브러리 디렉터리 (admin 관리 · 컨테이너엔 read-only 마운트) ----
 mkdir -p "$LIBS_DIR"
 chgrp "$MLTEAM_GROUP" "$LIBS_DIR"
@@ -110,7 +131,7 @@ if ! docker image inspect pia/dev-base &>/dev/null; then
     "$(dirname "${BASH_SOURCE[0]}")/build_base.sh"
 fi
 
-IMAGE="pia/dev-${USERNAME}"
+IMAGE="pia/ml-${USERNAME}"
 docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
@@ -119,7 +140,7 @@ docker build -t "$IMAGE" \
 echo "[ok] 이미지 빌드: $IMAGE (FROM pia/dev-base)"
 
 # ---- 4. 컨테이너 실행 ----
-CONTAINER="dev-${USERNAME}"
+CONTAINER="ml-${USERNAME}"
 if [[ "$GPU_DEVICES" == "all" ]]; then
     GPU_FLAG=(--gpus all)
 else
@@ -137,15 +158,45 @@ else
     else
         echo "[warn] $DATASETS_DIR 없음 — 데이터셋 마운트 생략"
     fi
+
+    # ---- Suprema 얼굴 SDK 라이선스: 활성화 원본을 컨테이너 $HOME 경로에 read-only 마운트 ----
+    # SDK 는 실행 사용자의 $HOME/.local/share/data/bconf/data.conf 를 읽는다. 컨테이너 홈은
+    # 호스트 홈 bind 이므로, 그 아래에 nested single-file bind 로 활성화 원본을 얹는다.
+    # (모든 dev 가 gpuadmin 의 단일 원본을 :ro 로 공유 — 복사 없음.) target 부모 dir 을
+    # 호스트 홈에 먼저 만들어 둔다(없으면 nested 마운트 실패).
+    install -d -o "$USERNAME" -g "$MLTEAM_GROUP" "$HOME_DIR/$(dirname "$FACE_LICENSE_REL")"
+    FACE_LICENSE_MOUNT=()
+    if [[ -f "$FACE_LICENSE_SRC" ]]; then
+        # ⚠️ HTTP 소비자엔 불필요(위 SUPREMA_ENDPOINT_URL 참조). qfe_http_server(C) 자체를
+        #    빌드/디버그하는 얼굴팀 개발용으로만 의미 — 그마저 노드락은 별도.
+        FACE_LICENSE_MOUNT=(-v "$FACE_LICENSE_SRC":"/home/${USERNAME}/${FACE_LICENSE_REL}":ro)
+    else
+        echo "[info] $FACE_LICENSE_SRC 없음 — 얼굴 SDK 라이선스 마운트 생략(HTTP 소비자엔 무관)"
+    fi
+
+    # 얼굴 identity 소비자용 엔드포인트 주입 — 정석 경로(ADR-023). 라이선스 파일 마운트보다 이게 우선.
+    FACE_ENDPOINT_ENV=()
+    if [[ -n "$SUPREMA_ENDPOINT_URL" ]]; then
+        # --add-host: host.docker.internal 을 호스트 게이트웨이로 매핑 → 호스트에서 도는 wrapper 에
+        # default-bridge 컨테이너가 도달(compose 네트워크의 trace-worker 와 동일한 접근 방식).
+        FACE_ENDPOINT_ENV=(--add-host "host.docker.internal:host-gateway" -e "SUPREMA_ENDPOINT=${SUPREMA_ENDPOINT_URL}")
+        echo "[ok] SUPREMA_ENDPOINT 주입: $SUPREMA_ENDPOINT_URL (host.docker.internal 매핑)"
+    else
+        echo "[info] SUPREMA_ENDPOINT_URL 미설정 — 엔드포인트 주입 생략(얼굴 identity off · 추적엔 무관)"
+    fi
+
     docker run -d --name "$CONTAINER" \
         --restart unless-stopped \
         "${GPU_FLAG[@]}" \
         --cpus "$CPUS" --memory "$MEMORY" --shm-size "$SHM_SIZE" \
+        --group-add "$MLTEAM_GID" \
         --label "owner=${USERNAME}" \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
         -v "$LIBS_DIR":/libs:ro \
         "${DATASET_MOUNT[@]}" \
+        "${FACE_LICENSE_MOUNT[@]}" \
+        "${FACE_ENDPOINT_ENV[@]}" \
         -w "/home/${USERNAME}/work" \
         "$IMAGE"
     echo "[ok] 컨테이너 실행: $CONTAINER (GPU=${GPU_DEVICES})"
@@ -178,6 +229,7 @@ cat <<EOF
            "Dev Containers: Attach to Running Container" → ${CONTAINER}
 
 할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP}
-마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro)
+마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro) · face-license=~/${FACE_LICENSE_REL}(ro)
+얼굴 SDK: SUPREMA_ENDPOINT=${SUPREMA_ENDPOINT_URL:-(미설정)} ← 42 호스트 qfe_http_server 주소(docs/suprema-license-sharing.md §실행계획)
 ※ README 의 GPU 할당 대장에 이 내용을 기록할 것.
 EOF
