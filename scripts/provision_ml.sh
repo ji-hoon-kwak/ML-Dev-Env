@@ -33,6 +33,8 @@ SUPREMA_ENDPOINT_URL="${SUPREMA_ENDPOINT_URL:-http://host.docker.internal:18080}
 LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · read-only 마운트, admin 관리)
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID — 호스트·컨테이너·bind-mount 가 같은 번호를 공유
+# 공용 인프라(piascope) compose 네트워크. 비워두면 자동 감지(실행 중 gateway 기준).
+SERVICE_NETWORK="${SERVICE_NETWORK:-}"
 CPUS="16"
 MEMORY="64g"
 SHM_SIZE="16g"
@@ -202,6 +204,27 @@ else
     echo "[ok] 컨테이너 실행: $CONTAINER (GPU=${GPU_DEVICES})"
 fi
 
+# ---- 4-bis. piascope 서비스 네트워크에 연결 ----
+# AI 파이프라인이 Milvus·Redis·PG·MediaMTX 등을 '서비스명'으로 접근하려면 같은
+# docker 네트워크에 있어야 한다(배포 .env.dev / infra/configs 재사용). 없으면
+# 호스트 IP+공개포트로 접근하면 된다.
+# ⚠️ 쓰기는 shared-infra-rules.md 대로 dev_<user> 네임스페이스로 격리할 것.
+if [[ -z "$SERVICE_NETWORK" ]]; then
+    # 실행 중인 piascope-gateway 가 붙어 있는 네트워크를 자동 감지
+    SERVICE_NETWORK="$(docker inspect piascope-gateway \
+        --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
+        | grep -v '^$' | head -1 || true)"
+fi
+if [[ -n "$SERVICE_NETWORK" ]] && docker network inspect "$SERVICE_NETWORK" &>/dev/null; then
+    if ! docker inspect "$CONTAINER" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | grep -qw "$SERVICE_NETWORK"; then
+        docker network connect "$SERVICE_NETWORK" "$CONTAINER"
+    fi
+    echo "[ok] 서비스 네트워크 연결: $SERVICE_NETWORK (서비스명 DNS 사용 가능)"
+else
+    echo "[warn] 서비스 네트워크를 못 찾음 — 호스트 IP+공개포트로 접근하거나"
+    echo "       SERVICE_NETWORK=<네트워크명> sudo -E $0 ... 로 재실행"
+fi
+
 # ---- 5. conda 활성화 snippet (호스트 ~/.bashrc — 컨테이너 안에서만 발동) ----
 SNIPPET_MARK="# >>> 42-dev-env conda >>>"
 if ! grep -qF "$SNIPPET_MARK" "$HOME_DIR/.bashrc" 2>/dev/null; then
@@ -228,8 +251,9 @@ cat <<EOF
   VS Code: Remote-SSH 로 호스트 접속 후
            "Dev Containers: Attach to Running Container" → ${CONTAINER}
 
-할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP}
+할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP} · 네트워크=${SERVICE_NETWORK:-(수동)}
 마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro) · face-license=~/${FACE_LICENSE_REL}(ro)
+인프라: 서비스명(milvus/postgres/redis/mediamtx…) 접근 가능 ← 쓰기는 dev_<user> 격리(docs/shared-infra-rules.md)
 얼굴 SDK: SUPREMA_ENDPOINT=${SUPREMA_ENDPOINT_URL:-(미설정)} ← 42 호스트 qfe_http_server 주소(docs/suprema-license-sharing.md §실행계획)
 ※ README 의 GPU 할당 대장에 이 내용을 기록할 것.
 EOF
