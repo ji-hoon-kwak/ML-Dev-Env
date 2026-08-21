@@ -10,6 +10,26 @@
   **insert/update/drop/migration(쓰기)은 반드시 본인 격리 네임스페이스**에서.
 - `piascope-*` 컨테이너·볼륨은 건드리지 않는다 (stop/rm/restart/prune 금지).
 
+## 0-bis. 개인별로 띄울까, 공유할까 (무게 + 데이터 기준)
+
+"쓰기 격리"의 두 가지 실현 방법: **① 공유 인프라에 `dev_<user>` 네임스페이스** 또는
+**② 개인 인스턴스를 따로 기동**. 무엇을 택할지는 이미지 무게 + canonical 데이터 유무로 갈린다.
+
+| 분류 | 대상 | 방침 | 이유 |
+|---|---|---|---|
+| **개인별 기동 권장** | **PostgreSQL · Redis** | 각자 `pg-<user>`·`redis-<user>` 로 띄운다 | 가볍다(각 수십 MB) · 쓰기/마이그레이션 잦아 격리 이득 큼 |
+| **읽기 공유 / 쓰기만 격리** | **Milvus · Elasticsearch** | 공유 canonical 을 **읽기**로 재사용, 쓰기는 `dev_<user>` 컬렉션·인덱스. 대량 인덱싱만 개인 인스턴스 | 무겁다(Milvus=etcd/스토리지+수 GB RAM · ES=JVM 힙 1–2GB) · 개인 인스턴스는 canonical 데이터가 없어 재인덱싱 비용 큼 |
+| **반드시 공유** | **MediaMTX+RTSP · GPU · AI서비스(scene/fg/trace) · Prometheus** (MLflow 권장) | 개인별로 포크 안 함 | RTSP 는 **입력 소스가 공유 자원** · GPU 는 유한 하드웨어 · AI서비스는 GPU+모델 메모리 · Prometheus 는 관측 싱글턴 |
+
+**개인 PG/Redis 띄우기** (개발자가 호스트에서, sudo 불필요):
+```bash
+./scripts/dev_stores.sh up          # pg-<본인>/redis-<본인> 기동 (서비스 네트워크 자동)
+./scripts/dev_stores.sh info        # 접속 정보
+./scripts/dev_stores.sh down        # 중지(데이터 보존) · purge = 데이터까지 삭제
+```
+컨테이너 안(ml-/pf-)에서 config 를 `pg-<user>:5432`·`redis-<user>:6379` 로 가리키면 끝
+(공유 `postgres`/`redis` 대신). Milvus/ES 는 그대로 공유를 읽되 쓰기만 `dev_<user>` 로.
+
 ## 1. 저장소별 규칙 (쓰기 격리 방법)
 
 | 인프라 | 읽기 | 쓰기(개발) | 격리 방법 |

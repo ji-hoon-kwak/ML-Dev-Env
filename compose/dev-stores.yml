@@ -1,0 +1,44 @@
+# 개인용 Postgres + Redis (쓰기 격리용).
+#
+# 왜: PG/Redis 는 가볍고(각 ~수십 MB RAM) 개발 중 쓰기·마이그레이션이 잦다 →
+#     공유 데모 DB 를 오염시키지 말고 개발자마다 자기 것을 띄운다.
+#     (무거운 Milvus/ES 는 개인별로 안 띄우고 공유 canonical 을 읽기로 재사용 — shared-infra-rules.md)
+#
+# 실행은 scripts/dev_stores.sh 로(네트워크 자동 감지). 직접 쓰려면:
+#   DEV_USER=<user> SERVICE_NETWORK=<piascope네트워크> \
+#     docker compose -f compose/dev-stores.yml -p dev-stores-<user> up -d
+#
+# 컨테이너 안(ml-/pf-)에서 접근: pg-<user>:5432 · redis-<user>:6379 (같은 서비스 네트워크, 이름 DNS)
+# 호스트에서(GUI 등): docker port pg-<user> 로 랜덤 배정된 호스트 포트 확인
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pg-${DEV_USER:?set DEV_USER}
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432"          # 랜덤 호스트 포트 배정(충돌 없음). 고정하려면 "3220:5432" 처럼.
+    networks: [service]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-${DEV_USER:?set DEV_USER}
+    ports:
+      - "6379"
+    networks: [service]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: pgdata-${DEV_USER}      # 개인별 영속 볼륨
+
+networks:
+  service:
+    external: true
+    name: ${SERVICE_NETWORK:?set SERVICE_NETWORK}   # 이미 떠 있는 piascope compose 네트워크

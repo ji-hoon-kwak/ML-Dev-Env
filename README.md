@@ -26,6 +26,9 @@ scripts/
   provision_ml.sh       # AI(ml-) 온보딩: 계정 + GPU 컨테이너 (base 없으면 자동 빌드)
   provision_pf.sh       # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 서비스망 연결
   deprovision.sh        # 오프보딩: ml-/pf-/dev- 컨테이너·이미지 제거 + 계정 잠금
+  dev_stores.sh         # 개발자용: 개인 PG/Redis(쓰기 격리) up/down/info
+compose/
+  dev-stores.yml         # 개인용 postgres + redis (dev_stores.sh 가 실행)
 docs/
   REQUEST-ACCESS.md      # 신규 개발자용: SSH 키 발급 + 환경 신청서
   ONBOARDING.md          # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
