@@ -67,6 +67,10 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 이 서버는 **PIA Scope dev 배포 스택이 같이 떠 있는 공용 서버**다
 (`piascope-*` 컨테이너 = gateway·UI·검색 서비스·DB·Milvus 등 — 데모/검증에 사용 중).
 
+> ⭐ 인프라(Milvus·PG·ES·Redis…) **쓰기 규칙은 [`shared-infra-rules.md`](shared-infra-rules.md)**
+> 를 반드시 먼저 읽는다 — 핵심은 "읽기는 자유, 쓰기는 `dev_<본인계정>` 네임스페이스로 격리".
+> 인덱싱/마이그레이션이 데모 데이터를 오염시키면 완성 판정이 깨진다.
+
 1. **`piascope-*` 컨테이너를 절대 건드리지 않는다** — stop/rm/restart 금지.
    서비스 스택 조작은 배포 담당만 한다.
 2. **`docker system prune` / `docker volume prune` 금지** — 서비스 데이터

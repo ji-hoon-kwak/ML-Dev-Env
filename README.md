@@ -27,9 +27,11 @@ scripts/
   provision_pf.sh       # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 서비스망 연결
   deprovision.sh        # 오프보딩: ml-/pf-/dev- 컨테이너·이미지 제거 + 계정 잠금
 docs/
-  REQUEST-ACCESS.md   # 신규 개발자용: SSH 키 발급 + 환경 신청서
-  ONBOARDING.md       # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
-  gpu-allocation.md   # GPU 4장 용도별 분할 정책 (단일 원천)
+  REQUEST-ACCESS.md      # 신규 개발자용: SSH 키 발급 + 환경 신청서
+  ONBOARDING.md          # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
+  gpu-allocation.md      # GPU 4장 용도별 분할 정책 (단일 원천)
+  shared-infra-rules.md  # ⭐ 공용 인프라(Milvus/PG/ES/Redis…) 쓰기 격리 규칙
+  platform-dev.md        # 플랫폼(BE/FE) 개발 가이드 (AI와 무엇이 다른가)
 ```
 
 **AI vs 플랫폼 — 왜 이미지가 다른가**: AI 개발자는 모델을 GPU 에서 직접 돌리므로
@@ -122,6 +124,9 @@ sudo ./scripts/provision_ml.sh <user> keys/<user>.pub 0
 scope UI 3401 · ssave 8001/8002 · PG 3120 · Redis 3130 · ES 3140 · MLflow 3150 ·
 MediaMTX 316x · Prometheus 3170 · Milvus 3110/3111)이 상시 기동 중이다.
 
+- ⭐ **공용 인프라 규칙**: [`docs/shared-infra-rules.md`](docs/shared-infra-rules.md) —
+  "읽기는 자유, 쓰기는 `dev_<user>` 격리". 인덱싱/마이그레이션이 데모 Milvus/PG 를
+  오염시키지 않게 강제하는 규칙(전 컨테이너 적용).
 - 개발자 수칙은 [`docs/ONBOARDING.md`](docs/ONBOARDING.md) §4 — piascope-* 조작 금지 ·
   prune 금지 · GPU 사용 선언 · 포트 개방 금지 · 호스트에서 compose 직접 실행 금지.
 - **리소스 상한 합계 관리**: `provision_ml.sh` 의 CPUS/MEMORY 기본값 × 인원수가
