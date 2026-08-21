@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 42 서버 개발자 오프보딩: 컨테이너·이미지 제거 + 계정 잠금.
 #
-# 사용법: sudo ./deprovision_dev.sh <username> [--delete-account]
+# 사용법: sudo ./deprovision.sh <username> [--delete-account]
 #   기본: 컨테이너/이미지 삭제 + SSH 키 제거 + 계정 잠금 (홈은 보존)
 #   --delete-account: 계정까지 삭제 (홈은 /data/archive/ 로 이동)
 set -euo pipefail

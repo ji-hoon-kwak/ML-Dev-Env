@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # 42 서버 AI(ML) 개발자 온보딩: 계정 생성 + 개인 ml 컨테이너 발급.
-#   ⭐ 컨테이너 접두사 = ml-  (GPU·torch 있는 AI 개발용). 플랫폼(BE/FE)은 provision_platform.sh(pf-).
+#   ⭐ 컨테이너 접두사 = ml-  (GPU·torch 있는 AI 개발용). 플랫폼(BE/FE)은 provision_pf.sh(pf-).
 #
 # 사용법 (42 서버에서 admin/sudo 로 실행):
-#   sudo ./provision_dev.sh <username> <pubkey-file> [gpu-devices]
-#   예: sudo ./provision_dev.sh dhkim keys/dhkim.pub          # GPU 전체 공유 (기본)
-#       sudo ./provision_dev.sh dhkim keys/dhkim.pub 2,3      # 특정 GPU 만
+#   sudo ./provision_ml.sh <username> <pubkey-file> [gpu-devices]
+#   예: sudo ./provision_ml.sh dhkim keys/dhkim.pub          # GPU 전체 공유 (기본)
+#       sudo ./provision_ml.sh dhkim keys/dhkim.pub 2,3      # 특정 GPU 만
 #
 # 하는 일:
 #   1. Unix 계정 생성 (비밀번호 잠금, SSH 키 인증만)
 #   2. docker 그룹 추가 (⚠️ 호스트 root 등가 — README 의 보안 절 참조)
-#   3. 개발자 UID 로 이미지 빌드 (pia/ml-<user>, base=pia/dev-base)
+#   3. 개발자 UID 로 이미지 빌드 (pia/ml-<user>, base=pia/ml-base)
 #   4. GPU·리소스 제한 걸린 컨테이너 ml-<user> 실행 (홈 + weights + datasets 마운트)
 #   5. 호스트 ~/.bashrc 에 conda 활성화 snippet 추가 (컨테이너 안에서만 동작)
 set -euo pipefail
@@ -26,7 +26,7 @@ FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이
 #    직접 초기화가 안 되고, 42 로컬 호스트에서 qfe_http_server 를 하나 띄운 뒤 그 주소를 여기 넣으면
 #    모든 dev 컨테이너가 같은 라이선스를 HTTP 로 공유한다. 42 서버 기본값을 여기 박아둔다 —
 #    이 스크립트는 42 전용 프로비저너라 원칙4(URL 하드코딩 금지)의 실무 예외로 둔다(top-of-file 상수).
-#    필요 시 `SUPREMA_ENDPOINT_URL=... sudo -E ./provision_dev.sh ...` 로 오버라이드, 빈 문자열이면
+#    필요 시 `SUPREMA_ENDPOINT_URL=... sudo -E ./provision_ml.sh ...` 로 오버라이드, 빈 문자열이면
 #    주입 생략(identity off — 추적은 계속). 아래 docker run 이 --add-host 로 host.docker.internal 매핑.
 #    배경·실행순서 = docs/suprema-license-sharing.md §실행계획.
 SUPREMA_ENDPOINT_URL="${SUPREMA_ENDPOINT_URL:-http://host.docker.internal:18080}"
@@ -124,20 +124,20 @@ chmod 2775 "$LIBS_DIR"       # 호스트: admin/mlteam 이 관리. 컨테이너:
 echo "[ok] 공유 라이브러리 디렉터리 정렬: $LIBS_DIR (그룹=$MLTEAM_GROUP)"
 
 # ---- 3. base 이미지 보장 + 개인 이미지 빌드 ----
-# pia/dev-base(무거운 conda)가 없으면 최초 1회 빌드. 이후 개발자별 이미지는
+# pia/ml-base(무거운 conda)가 없으면 최초 1회 빌드. 이후 개발자별 이미지는
 # 그 위에 useradd 한 줄만 얹으므로 ~1초에 끝난다(build cache 유무와 무관).
-if ! docker image inspect pia/dev-base &>/dev/null; then
-    echo "[..] pia/dev-base 없음 — 최초 1회 빌드"
-    "$(dirname "${BASH_SOURCE[0]}")/build_base.sh"
+if ! docker image inspect pia/ml-base &>/dev/null; then
+    echo "[..] pia/ml-base 없음 — 최초 1회 빌드"
+    "$(dirname "${BASH_SOURCE[0]}")/build_ml_base.sh"
 fi
 
 IMAGE="pia/ml-${USERNAME}"
 docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
-    -f "$BASE_IMAGE_DIR/Dockerfile" \
+    -f "$BASE_IMAGE_DIR/Dockerfile.ml" \
     "$BASE_IMAGE_DIR"
-echo "[ok] 이미지 빌드: $IMAGE (FROM pia/dev-base)"
+echo "[ok] 이미지 빌드: $IMAGE (FROM pia/ml-base)"
 
 # ---- 4. 컨테이너 실행 ----
 CONTAINER="ml-${USERNAME}"

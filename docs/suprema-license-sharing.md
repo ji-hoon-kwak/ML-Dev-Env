@@ -20,7 +20,7 @@
   → 10명에게 각자 SDK 를 줄 수 **없다**. 공유가 선택이 아니라 사실상 강제.
 - **∴ dev 컨테이너가 필요한 건 라이선스 파일(data.conf)이 아니라 `SUPREMA_ENDPOINT`(서버 URL)다.**
   data.conf 마운트는 **일반 개발 용도로는 잘못된 계층**이다(노드락 때문에 마운트해도 in-container
-  InitSDK 는 통과 안 함). provision_dev.sh 의 data.conf 마운트는 **엔드포인트 주입으로 대체 예정**
+  InitSDK 는 통과 안 함). provision_ml.sh 의 data.conf 마운트는 **엔드포인트 주입으로 대체 예정**
   (아래 §5, 검증 후).
 
 ---
@@ -105,7 +105,7 @@ curl -s 127.0.0.1:18080/health
 
 ---
 
-## 5. provision_dev.sh 처리 방침
+## 5. provision_ml.sh 처리 방침
 
 - **현재 상태**: `FACE_LICENSE_SRC=/data/libs/qfe_home/data.conf` 를 컨테이너 SDK 경로에 `:ro`
   마운트 + `--group-add MLTEAM_GID`. (2026-08-19 작업.)
@@ -164,7 +164,7 @@ source /data/libs/qfe_license/env.sh
 ./qfe_http_server --bind 0.0.0.0 --db /data/libs/facedb/face_database.db &
 ```
 그리고 컨테이너는 `http://host.docker.internal:18080` 으로 붙는다(각 컨테이너가 `--add-host
-host.docker.internal:host-gateway` 로 자기 네트워크의 호스트 IP 를 얻음). provision_dev.sh 는
+host.docker.internal:host-gateway` 로 자기 네트워크의 호스트 IP 를 얻음). provision_ml.sh 는
 `SUPREMA_ENDPOINT_URL` 설정 시 이 `--add-host` 를 자동으로 넣는다.
 
 ⚠️ **OPS-012 (반드시)**: `0.0.0.0` 바인드는 **인증 없는 생체 매처를 LAN 에도 노출**한다. **호스트
@@ -179,10 +179,10 @@ sudo iptables -I DOCKER-USER -p tcp --dport 18080 ! -s 172.16.0.0/12 -j DROP
 
 ### Phase 3 — 소비자에 `SUPREMA_ENDPOINT` 주입 (라이선스 파일 아님)
 
-**dev 컨테이너** (provision_dev.sh — 우리가 소유, 바로 적용 가능):
+**dev 컨테이너** (provision_ml.sh — 우리가 소유, 바로 적용 가능):
 ```bash
 SUPREMA_ENDPOINT_URL="http://host.docker.internal:18080" \
-  sudo -E ./scripts/provision_dev.sh <user> keys/<user>.pub
+  sudo -E ./scripts/provision_ml.sh <user> keys/<user>.pub
 ```
 `SUPREMA_ENDPOINT_URL` 이 세팅되면 스크립트가 `--add-host host.docker.internal:host-gateway`
 + `-e SUPREMA_ENDPOINT=...` 를 자동 주입한다. 기존 컨테이너는 재발급해야 반영.
@@ -266,7 +266,7 @@ curl -s 172.17.0.1:18080/health
   라이선스 로딩은 유닛 ExecStart의 `source /data/libs/qfe_license/env.sh`.
 - **trace-worker**(compose): `SUPREMA_ENDPOINT=http://host.docker.internal:18080` +
   `extra_hosts: host.docker.internal:host-gateway`. 값은 `.env`(통합됨, `.env.dev` 아님)에서 주입.
-- **dev 컨테이너**(provision_dev.sh): `SUPREMA_ENDPOINT_URL` 기본값이
+- **dev 컨테이너**(provision_ml.sh): `SUPREMA_ENDPOINT_URL` 기본값이
   `http://host.docker.internal:18080` → 발급 시 `--add-host` + `-e`로 자동 주입.
 - **방화벽(OPS-012)**: 18080을 loopback + docker 서브넷(172.16/12)만 허용, 그 외 DROP.
 
@@ -296,7 +296,7 @@ sudo netfilter-persistent save     # /etc/iptables/rules.v4 에 저장 (18080 3�
 ```
 
 ### 남은 항목
-- `provision_dev.sh` 최신본 rsync → dev 컨테이너는 재발급 시 자동으로 endpoint 주입.
+- `provision_ml.sh` 최신본 rsync → dev 컨테이너는 재발급 시 자동으로 endpoint 주입.
 - `.env`의 `INTERNAL_SERVICE_SECRET`가 placeholder(`asdf`)면 `openssl rand -hex 32`로 교체.
 - 네트워크 노출 정책(0.0.0.0+방화벽)은 얼굴/인프라 담당 복귀 시 재확인.
 - wrapper 바이너리 갱신 시: 재빌드 → `/data/libs/qfe_http_server/`에 재배치 → `systemctl restart qfe-http`.
@@ -309,4 +309,4 @@ sudo netfilter-persistent save     # /etc/iptables/rules.v4 에 저장 (18080 3�
 - `infra/configs/identity.yaml` (`identity.suprema.endpoint: ${SUPREMA_ENDPOINT}`)
 - `piapf/face/suprema_adapter.py` (`resolve_endpoint`, HTTP 클라이언트)
 - ADR-023 (Suprema 어댑터 격리) · TICKET-OPS-012 (loopback/네트워크 노출)
-- `42-dev-env/scripts/provision_dev.sh`
+- `42-dev-env/scripts/provision_ml.sh`

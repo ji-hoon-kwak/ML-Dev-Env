@@ -66,9 +66,10 @@ cat ~/.ssh/id_ed25519.pub        # macOS/Linux
 
 ## 3단계 — 발급 대기 (admin 작업, 보통 몇 분)
 
-admin 이 `provision_dev.sh` 로 다음을 자동 생성한다:
+admin 이 역할에 맞는 스크립트(`provision_ml.sh`=AI · `provision_pf.sh`=플랫폼)로 자동 생성한다:
 - Unix 계정(비밀번호 없이 SSH 키 인증만) + docker 그룹
-- 개인 개발 컨테이너 `dev-<계정명>` (conda `dev` 환경 · GPU · `/weights`·`/datasets` 마운트)
+- 개인 개발 컨테이너 `ml-<계정명>`(AI · GPU) 또는 `pf-<계정명>`(플랫폼 · GPU 없음)
+  (conda `dev` 환경 · `/weights`·`/libs`·`/datasets` 마운트)
 
 발급이 끝나면 admin 이 **서버 주소 + 할당된 GPU** 를 알려준다.
 
@@ -82,7 +83,7 @@ admin 이 `provision_dev.sh` 로 다음을 자동 생성한다:
 첫 접속 요약만:
 ```bash
 ssh <계정명>@<서버주소>
-docker exec -it dev-<계정명> bash     # (dev) conda 환경 자동 활성화
+docker exec -it <ml|pf>-<계정명> bash   # (dev) conda 환경 자동 활성화 (ml=AI · pf=플랫폼)
 ```
 
 > ⚠️ 첫 Remote-SSH 접속은 VS Code 확장(Python·Jupyter)을 새로 설치하느라
@@ -93,6 +94,6 @@ docker exec -it dev-<계정명> bash     # (dev) conda 환경 자동 활성화
 ## 자주 묻는 것
 
 - **키를 잃어버렸어요** → 새로 `ssh-keygen` 하고 새 `.pub` 을 admin 에게 보내 교체 요청.
-- **컨테이너가 죽어 있어요** → `ssh` 접속 후 `docker start dev-<계정명>`. 안 되면 admin.
+- **컨테이너가 죽어 있어요** → `ssh` 접속 후 `docker start <ml|pf>-<계정명>`. 안 되면 admin.
 - **내 코드는 어디에 두나요** → 홈(`/home/<계정명>`) 아래면 어디든 컨테이너 재발급에도
   안전하다. 단 **git 으로 사내 원격에 자주 push** 하는 게 진짜 백업이다 (`ONBOARDING.md` §3).

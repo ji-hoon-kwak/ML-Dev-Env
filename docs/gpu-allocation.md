@@ -29,8 +29,8 @@
 
 **개발자 컨테이너 (GPU 0 로 재발급):**
 ```bash
-sudo docker rm -f dev-<계정명>
-sudo ./scripts/provision_dev.sh <계정명> keys/<계정명>.pub 0
+sudo docker rm -f ml-<계정명>
+sudo ./scripts/provision_ml.sh <계정명> keys/<계정명>.pub 0
 # 홈은 bind-mount 라 코드·설정 보존. conda 추가 env·apt 설치만 재구성 필요.
 ```
 
@@ -60,7 +60,7 @@ docker run --rm --gpus '"device=2,3"' \
 nvidia-smi -L                                    # 물리 GPU 목록
 nvidia-smi                                       # 현재 어느 GPU 를 누가 점유 중인가
 # 컨테이너별 GPU 할당 확인:
-docker inspect dev-dhkim --format \
+docker inspect ml-dhkim --format \
   '{{range .HostConfig.DeviceRequests}}gpu={{.DeviceIDs}}{{end}}'
 ```
 

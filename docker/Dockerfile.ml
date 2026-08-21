@@ -1,14 +1,14 @@
-# pia/dev-<user> — 개발자별 얇은 이미지.
+# pia/ml-<user> — AI(ML) 개발자별 얇은 이미지.
 #
-# pia/dev-base(무거운 conda) 위에 계정 한 개만 얹는다 → 빌드 ~1초.
-# provision_dev.sh 가 개발자별 UID 를 넣어 빌드한다:
-#   docker build -t pia/dev-<user> \
+# pia/ml-base(무거운 conda) 위에 계정 한 개만 얹는다 → 빌드 ~1초.
+# provision_ml.sh 가 개발자별 UID 를 넣어 빌드한다:
+#   docker build -t pia/ml-<user> \
 #     --build-arg USERNAME=<user> --build-arg UID=<uid> \
-#     -f docker/Dockerfile docker/
+#     -f docker/Dockerfile.ml docker/
 #
-# ⚠️ pia/dev-base 가 먼저 존재해야 한다 (scripts/build_base.sh · provision 이 자동 확인).
+# ⚠️ pia/ml-base 가 먼저 존재해야 한다 (scripts/build_ml_base.sh · provision 이 자동 확인).
 
-FROM pia/dev-base
+FROM pia/ml-base
 
 # primary group = mlteam (base 에서 생성) → /home·/weights bind-mount 소유권이 호스트와 일치.
 ARG USERNAME=dev

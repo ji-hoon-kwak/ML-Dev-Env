@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 42 서버 플랫폼(BE/FE) 개발자 온보딩: 계정 생성 + 개인 pf 컨테이너 발급.
-#   ⭐ 컨테이너 접두사 = pf-  (GPU·torch 없음, python + node). AI(ML)는 provision_dev.sh(ml-).
+#   ⭐ 컨테이너 접두사 = pf-  (GPU·torch 없음, python + node). AI(ML)는 provision_ml.sh(ml-).
 #
 # AI 컨테이너와의 차이:
 #   - GPU 미할당 (플랫폼은 모델을 직접 안 돌리고 AI 서비스를 HTTP 호출만 함)
@@ -9,7 +9,7 @@
 #     ssave-scene/ssave-fg/trace-api 를 서비스명으로 접근(배포 .env.dev 재사용 가능)
 #
 # 사용법 (42 서버에서 admin/sudo 로 실행):
-#   sudo ./provision_platform.sh <username> <pubkey-file>
+#   sudo ./provision_pf.sh <username> <pubkey-file>
 set -euo pipefail
 
 # ---- 팀 공통 설정 (필요 시 수정) ----
@@ -95,14 +95,14 @@ echo "[ok] 공유 디렉터리 정렬: $WEIGHTS_DIR, $LIBS_DIR (그룹=$MLTEAM_G
 # ---- 3. base 이미지 보장 + 개인 이미지 빌드 ----
 if ! docker image inspect pia/pf-base &>/dev/null; then
     echo "[..] pia/pf-base 없음 — 최초 1회 빌드"
-    "$(dirname "${BASH_SOURCE[0]}")/build_platform_base.sh"
+    "$(dirname "${BASH_SOURCE[0]}")/build_pf_base.sh"
 fi
 
 IMAGE="pia/pf-${USERNAME}"
 docker build -t "$IMAGE" \
     --build-arg USERNAME="$USERNAME" \
     --build-arg UID="$DEV_UID" \
-    -f "$BASE_IMAGE_DIR/Dockerfile.platform" \
+    -f "$BASE_IMAGE_DIR/Dockerfile.pf" \
     "$BASE_IMAGE_DIR"
 echo "[ok] 이미지 빌드: $IMAGE (FROM pia/pf-base · GPU/torch 없음)"
 

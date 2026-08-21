@@ -11,7 +11,7 @@ AI(ML) 개발자와 **무엇이 다른지**부터 정리한다.
 | 모델 | 직접 로드 | **직접 안 함** — AI 서비스를 HTTP 호출 |
 | 필요 | GPU·CUDA·torch·모델 wheel | Python(FastAPI) + **Node(Next.js)**. GPU·torch **불필요** |
 | 컨테이너 | `ml-<user>` (GPU 할당) | `pf-<user>` (**GPU 없음**) |
-| 이미지 | `pia/dev-base` (cuda+torch) | `pia/pf-base` (경량, node) |
+| 이미지 | `pia/ml-base` (cuda+torch) | `pia/pf-base` (경량, node) |
 
 핵심: 플랫폼 코드는 모델을 절대 로드하지 않고 `http://…ssave-scene:8001` 같은 URL로
 AI 서비스를 부른다(원칙 3, Pluggable Models 경계 바깥). **GPU는 AI 서비스 쪽에만** 있다.
@@ -25,7 +25,7 @@ AI 서비스를 부른다(원칙 3, Pluggable Models 경계 바깥). **GPU는 AI
 - **개인(내가 쓰기·마이그레이션)**: 필요 시 Postgres·Redis 를 개인용으로(가벼움).
 - **내가 고치는 것만 실행**: gateway 또는 FE, dev 전용 포트로.
 
-`provision_platform.sh` 는 `pf-` 컨테이너를 piascope **서비스 네트워크에 자동 연결**하므로,
+`provision_pf.sh` 는 `pf-` 컨테이너를 piascope **서비스 네트워크에 자동 연결**하므로,
 배포 스택과 똑같이 **서비스명**(`postgres:5432`·`piascope-ssave-scene:8001`…)으로 접근할 수 있다
 → 배포 `.env.dev` 를 거의 그대로 재사용.
 
@@ -75,6 +75,6 @@ cd ui/apps/scope && npm install && npm run dev -- --port 3405
 ## 발급 (admin)
 
 ```bash
-sudo ./scripts/provision_platform.sh <user> keys/<user>.pub
+sudo ./scripts/provision_pf.sh <user> keys/<user>.pub
 # pia/pf-base 없으면 자동 빌드(최초 수 분). 이후 발급은 ~1초.
 ```

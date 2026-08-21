@@ -29,7 +29,7 @@ Host gpu42
 
 ```bash
 ssh gpu42
-docker exec -it dev-<본인계정> bash   # 프롬프트에 (dev) 가 붙으면 정상
+docker exec -it <ml|pf>-<본인계정> bash   # 접두사: ml=AI, pf=플랫폼 · 프롬프트에 (dev) env 활성화
 python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 ```
 
@@ -37,7 +37,7 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 
 1. 로컬 VS Code 에 확장 설치: **Remote - SSH**, **Dev Containers**
 2. `Cmd+Shift+P` → `Remote-SSH: Connect to Host` → `gpu42`
-3. 열린 원격 창에서 `Cmd+Shift+P` → `Dev Containers: Attach to Running Container` → `dev-<본인계정>`
+3. 열린 원격 창에서 `Cmd+Shift+P` → `Dev Containers: Attach to Running Container` → `<ml|pf>-<본인계정>` (ml=AI · pf=플랫폼)
 4. 폴더 열기: `/home/<본인계정>/work`
 
 이후에는 VS Code 좌하단 초록 버튼 → Recent 에서 바로 재접속된다.
@@ -110,7 +110,7 @@ ssh -F /dev/null -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
 
 ### 그 외
 
-- 컨테이너가 죽어 있음: `ssh gpu42` 후 `docker start dev-<계정>` (재부팅 후 자동 시작이 안 됐을 때)
+- 컨테이너가 죽어 있음: `ssh gpu42` 후 `docker start <ml|pf>-<계정>` (재부팅 후 자동 시작이 안 됐을 때)
 - 첫 Remote-SSH 접속이 오래 걸림: VS Code 확장(Python·Jupyter) 최초 설치 중 —
   멈춘 게 아니니 기다린다. 두 번째부터는 즉시 붙는다.
 - 그 외: admin(@jhkwak) 에게. 컨테이너 재발급은 홈 데이터를 건드리지 않는다.
