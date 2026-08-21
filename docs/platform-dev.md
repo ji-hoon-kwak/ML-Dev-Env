@@ -1,7 +1,11 @@
 # 플랫폼(BE/FE) 개발 가이드
 
-플랫폼 개발자(Gateway·FE)가 42 서버의 `pf-<user>` 컨테이너에서 개발하는 방법.
-AI(ML) 개발자와 **무엇이 다른지**부터 정리한다.
+플랫폼 개발자(Gateway·FE)의 개발 방법. AI(ML) 개발자와 **무엇이 다른지**부터 정리한다.
+
+> ⭐ **PF 기본 워크플로우 = 로컬(맥) 우선 + SSH 터널** (§로컬 우선 워크플로우).
+> `pf-` 컨테이너는 필수가 아니라 **비상구**다(Linux 재현·심층 디버깅용).
+> ML 은 GPU 때문에 컨테이너가 필수지만, PF 는 로컬이 Conductor 등 생산성 도구를
+> 그대로 쓸 수 있어 우선이다.
 
 ## AI(ML) vs 플랫폼(PF) — 근본 차이
 
@@ -29,7 +33,59 @@ AI 서비스를 부른다(원칙 3, Pluggable Models 경계 바깥). **GPU는 AI
 배포 스택과 똑같이 **서비스명**(`postgres:5432`·`piascope-ssave-scene:8001`…)으로 접근할 수 있다
 → 배포 `.env.dev` 를 거의 그대로 재사용.
 
-## 개발 흐름 (컨테이너 안)
+## ⭐ 로컬 우선 워크플로우 (PF 기본)
+
+코드·에이전트(Conductor)·실행 전부 **맥 로컬**. 42 의 인프라·AI 서비스만 SSH 터널로
+로컬처럼 붙인다. scope(FE)·gateway 개발에 인프라가 발목 잡지 않게 하는 구성.
+
+**1) `~/.ssh/config` 의 gpu42 블록에 터널 추가:**
+```
+Host gpu42
+    HostName 10.128.30.42
+    User <본인계정>
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    ServerAliveInterval 30
+    ExitOnForwardFailure yes
+    # --- PF 인프라 터널 (ssh 켜두면 전부 localhost 로 보임) ---
+    LocalForward 3101 localhost:3101   # ssave-scene
+    LocalForward 3102 localhost:3102   # ssave-fg
+    LocalForward 3001 localhost:3001   # trace-api
+    LocalForward 3110 localhost:3110   # milvus (읽기)
+    LocalForward 3140 localhost:3140   # elasticsearch (읽기)
+    LocalForward 3170 localhost:3170   # prometheus (GPU 서비스 상태 점검)
+```
+터널만 유지: `ssh -N gpu42` (셸 없이 포워딩만 · 끊기면 재실행).
+
+**2) 로컬 gateway** — `.env` 에 터널 주소 + 배포 시크릿:
+```
+SSAVE_SCENE_URL=http://localhost:3101
+SSAVE_FG_URL=http://localhost:3102
+TRACE_API_URL=http://localhost:3001
+INTERNAL_SERVICE_SECRET=<배포 .env.dev 와 동일값>   # fail-closed — 다르면 502/401
+DATABASE_URL=postgresql://...@localhost:5432/...     # ⬇ 로컬 PG (아래 3)
+```
+
+**3) 쓰기 저장소(PG·Redis)는 맥 로컬 Docker 로** — 공유 데모 DB 오염 방지(쓰기 격리).
+가벼우니 Docker Desktop 으로 `postgres:16-alpine`·`redis:7-alpine` 띄우면 끝.
+Milvus/ES 는 로컬로 안 띄우고 터널 너머 공유를 **읽기만**.
+
+**4) FE(scope) 는 CORS 를 원천 차단** — 브라우저가 cross-origin 을 직접 치지 않게,
+**same-origin 프록시**를 경유시킨다 (CORS 는 브라우저→타 origin 직접 호출에서만 발생;
+서버↔서버 호출엔 없음):
+```js
+// next.config.js (dev): 브라우저는 항상 localhost:3401 만 본다
+async rewrites() {
+  return [{ source: '/api/:path*', destination: 'http://localhost:3100/api/:path*' }];
+}
+```
+gateway 를 로컬 3100 에 띄우든, 원격 gateway 를 `LocalForward 3100` 으로 당기든
+rewrites 목적지는 동일하게 localhost — 어느 쪽이든 CORS 소멸.
+
+**5) 실스택 검증** — 로컬에서 되면 증분 재배포 스크립트로 42 에 밀어넣고 smoke check.
+환경을 옮겨 다니지 않는다(소스오브트루스 = 로컬 git 하나).
+
+## 개발 흐름 (컨테이너 안 — 비상구 경로)
 
 ```bash
 docker exec -it pf-<user> bash          # conda dev env 자동 활성화 (python + node)
