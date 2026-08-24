@@ -150,21 +150,22 @@ else
     echo "       SERVICE_NETWORK=<네트워크명> sudo -E $0 ... 로 재실행"
 fi
 
-# ---- 5. conda 활성화 snippet (호스트 ~/.bashrc — 컨테이너 안에서만 발동) ----
-SNIPPET_MARK="# >>> 42-dev-env conda >>>"
+# ---- 5. venv PATH snippet (호스트 ~/.bashrc — 컨테이너 안에서만 발동) ----
+# pf 는 conda 없음 — 이미지가 /opt/venv 에 python+node 를 두고 ENV PATH 로 노출한다.
+# login 셸(bash -l)이 PATH 를 재설정하는 경우 대비해 홈 ~/.bashrc 에도 guarded 추가.
+SNIPPET_MARK="# >>> 42-dev-env venv >>>"
 if ! grep -qF "$SNIPPET_MARK" "$HOME_DIR/.bashrc" 2>/dev/null; then
     cat >> "$HOME_DIR/.bashrc" <<'EOF'
 
-# >>> 42-dev-env conda >>>
-# 컨테이너 안(/opt/conda 존재)에서만 conda 초기화 + dev env 활성화
-if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
-    . /opt/conda/etc/profile.d/conda.sh
-    conda activate dev
+# >>> 42-dev-env venv >>>
+# 컨테이너 안(/opt/venv 존재)에서만 venv 를 PATH 앞에 (python/uvicorn/node)
+if [ -d /opt/venv/bin ]; then
+    export PATH=/opt/venv/bin:$PATH
 fi
-# <<< 42-dev-env conda <<<
+# <<< 42-dev-env venv <<<
 EOF
     chown "$USERNAME:$MLTEAM_GROUP" "$HOME_DIR/.bashrc"
-    echo "[ok] ~/.bashrc 에 conda 활성화 snippet 추가"
+    echo "[ok] ~/.bashrc 에 venv PATH snippet 추가"
 fi
 
 cat <<EOF
@@ -172,7 +173,7 @@ cat <<EOF
 === 플랫폼 발급 완료: $USERNAME ===
 접속 안내 (개발자에게 전달):
   1) ssh ${USERNAME}@<42서버주소>
-  2) docker exec -it ${CONTAINER} bash    # conda dev env 자동 활성화 (python + node)
+  2) docker exec -it ${CONTAINER} bash    # /opt/venv 활성 (python + node, conda 없음)
   VS Code: Remote-SSH 접속 후 "Attach to Running Container" → ${CONTAINER}
 
 구성: GPU 없음 · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP} · 네트워크=${SERVICE_NETWORK:-(수동)}

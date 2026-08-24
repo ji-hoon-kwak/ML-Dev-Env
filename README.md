@@ -17,12 +17,12 @@ docker/
   Dockerfile.ml-base    # pia/ml-base: nvidia/cuda 12.4 + Miniforge + torch (AI, 무거움)
   Dockerfile.ml         # pia/ml-<user>: FROM pia/ml-base + 계정 (~1초)
   environment.ml.yml    # AI conda env: torch cu124, opencv, ultralytics 등
-  Dockerfile.pf-base    # pia/pf-base: ubuntu + Miniforge + node (플랫폼, GPU/torch 없음)
+  Dockerfile.pf-base    # pia/pf-base: python:3.12-slim + node (플랫폼, GPU/torch/conda 없음)
   Dockerfile.pf         # pia/pf-<user>: FROM pia/pf-base + 계정 (~1초)
-  environment.pf.yml    # 플랫폼 conda env: python + nodejs + fastapi/uvicorn
+  requirements.pf.txt   # 플랫폼 pip 의존성: fastapi/uvicorn/httpx (conda 없음 · venv)
 scripts/
   build_ml_base.sh      # pia/ml-base 빌드 (AI · 최초 1회 / environment.ml.yml 변경 시)
-  build_pf_base.sh      # pia/pf-base 빌드 (플랫폼 · 최초 1회 / environment.pf.yml 변경 시)
+  build_pf_base.sh      # pia/pf-base 빌드 (플랫폼 · 최초 1회 / requirements.pf.txt 변경 시)
   provision_ml.sh       # AI(ml-) 온보딩: 계정 + GPU 컨테이너 (base 없으면 자동 빌드)
   provision_pf.sh       # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 서비스망 연결
   deprovision.sh        # 오프보딩: ml-/pf-/dev- 컨테이너·이미지 제거 + 계정 잠금

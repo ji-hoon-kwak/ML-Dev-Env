@@ -88,7 +88,7 @@ rewrites 목적지는 동일하게 localhost — 어느 쪽이든 CORS 소멸.
 ## 개발 흐름 (컨테이너 안 — 비상구 경로)
 
 ```bash
-docker exec -it pf-<user> bash          # conda dev env 자동 활성화 (python + node)
+docker exec -it pf-<user> bash          # /opt/venv 활성 (python + node, conda 없음)
 git clone <repo>; cd TRACE_SSAVE-AI-MVP
 
 # Gateway (light 설치 — torch 없음)

@@ -1,40 +1,42 @@
 # pia/pf-base — 플랫폼(BE/FE) 개발 공용 베이스 이미지.
 #
-# AI 베이스(pia/ml-base)와 달리 **CUDA·torch·GPU 가 없다** — 플랫폼 개발자는
-# 모델을 직접 돌리지 않고 AI 서비스(scene/fg/trace)를 HTTP 로 호출할 뿐이다.
-# 대신 FE(Next.js)용 **Node.js** 가 들어간다.
+# ⭐ conda 없음. 플랫폼은 모델을 직접 돌리지 않고 AI 서비스(scene/fg/trace)를 HTTP 로
+#    호출할 뿐이라, conda 같은 데이터사이언스 환경관리자가 불필요하다 — 순수
+#    Python 3.12(venv) + Node 로 충분. 수정된 AI 모델 서비스를 GPU 로 직접 실행해야
+#    할 때는 pf 가 아니라 ml 컨테이너(pia/ml-base)나 배포 서비스를 쓴다.
 #
-# admin 이 scripts/build_pf_base.sh 로 1회 빌드(environment.pf.yml 변경 시 재실행).
+# admin 이 scripts/build_pf_base.sh 로 1회 빌드(requirements.pf.txt 변경 시 재실행).
 # 개발자별 이미지는 이 위에 useradd 만 얹는다(Dockerfile.pf · ~1초).
 
-FROM ubuntu:22.04
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- OS 패키지 ---
+# --- OS 패키지 + Node 20 (NodeSource) — FE(Next.js). corepack 로 pnpm. ---
+# build-essential: 일부 pip 의존성이 소스 빌드로 폴백할 때 대비(대개 wheel 사용).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        sudo git wget curl ca-certificates openssh-client build-essential \
+        sudo git curl ca-certificates gnupg openssh-client build-essential \
         tmux htop vim \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Miniforge (conda) — Anaconda 상용 리포 회피(conda-forge) ---
-RUN wget -qO /tmp/miniforge.sh \
-        "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
-    && bash /tmp/miniforge.sh -b -p /opt/conda \
-    && rm /tmp/miniforge.sh
-
-# --- mlteam 그룹 + 기본 env(dev): python + nodejs ---
-# conda 트리를 root:mlteam group-writable 로 → 개발자가 자기 컨테이너 안에서
-# pip/conda/npm 설치 가능(copy-on-write 라 다른 개발자에겐 영향 없음).
+# --- mlteam 그룹 + 공용 venv(group-writable) ---
+# venv 를 /opt/venv(홈 밖)에 두는 이유: 홈은 호스트 볼륨으로 덮이므로 홈 안에 만들면
+# 이미지에 구운 환경이 마운트에 가려진다. group-writable → 개발자가 자기 컨테이너
+# 안에서 pip 설치 가능(copy-on-write 라 다른 개발자에겐 영향 없음).
 ARG MLTEAM_GID=2000
-COPY environment.pf.yml /opt/project/environment.yml
+COPY requirements.pf.txt /opt/project/requirements.pf.txt
 RUN groupadd -g "${MLTEAM_GID}" mlteam \
-    && /opt/conda/bin/conda env create -f /opt/project/environment.yml \
-    && /opt/conda/bin/conda clean -afy \
-    && chown -R root:"${MLTEAM_GID}" /opt/conda \
-    && chmod -R g+w /opt/conda \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -U pip \
+    && /opt/venv/bin/pip install --no-cache-dir -r /opt/project/requirements.pf.txt \
+    && chown -R root:"${MLTEAM_GID}" /opt/venv \
+    && chmod -R g+w /opt/venv \
     && mkdir -p /workspace && chown root:"${MLTEAM_GID}" /workspace && chmod 2775 /workspace
 
-ENV PATH=/opt/conda/envs/dev/bin:/opt/conda/bin:$PATH
+# venv 를 PATH 기본값으로 — docker exec 셸에 python/uvicorn 즉시 노출.
+ENV PATH=/opt/venv/bin:$PATH
 
 CMD ["sleep", "infinity"]

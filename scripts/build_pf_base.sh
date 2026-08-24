@@ -3,7 +3,7 @@
 #
 # 언제 실행하나:
 #   - 최초 1회 (플랫폼 개발자 첫 발급 전). provision_pf.sh 가 없으면 자동 호출한다.
-#   - docker/environment.pf.yml 을 바꿨을 때.
+#   - docker/requirements.pf.txt 를 바꿨을 때.
 #
 # 사용법: sudo ./build_pf_base.sh
 set -euo pipefail
@@ -25,7 +25,7 @@ else
     echo "[ok] 호스트 그룹 생성: $MLTEAM_GROUP (gid=$MLTEAM_GID)"
 fi
 
-echo "[..] pia/pf-base 빌드 (conda + node 설치 — 최초 수 분)"
+echo "[..] pia/pf-base 빌드 (python + node 설치 — 최초 수 분, conda 없음)"
 docker build -t pia/pf-base \
     --build-arg MLTEAM_GID="$MLTEAM_GID" \
     -f "$DOCKER_DIR/Dockerfile.pf-base" \

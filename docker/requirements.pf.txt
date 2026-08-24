@@ -1,0 +1,5 @@
+# 플랫폼(BE/FE) 베이스 pip 의존성 — GPU/torch 없음.
+# 실제 서비스 의존성은 repo 에서 `pip install -e .`(light) / FE `pnpm install` 로 각자 받는다.
+fastapi
+uvicorn[standard]
+httpx
