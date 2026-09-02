@@ -4,6 +4,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
+  - nodejs           # node + npm (FE/JS 툴링 · corepack 로 pnpm)
   - numpy
   - pandas
   - pip
