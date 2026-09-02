@@ -14,21 +14,24 @@
 
 ```
 docker/
-  Dockerfile.ml-base    # pia/ml-base: nvidia/cuda 12.4 + Miniforge + torch (AI, 무거움)
+  Dockerfile.ml-base    # pia/ml-base: nvidia/cuda 12.4 + Miniforge + torch + sshd + PG/Redis
   Dockerfile.ml         # pia/ml-<user>: FROM pia/ml-base + 계정 (~1초)
   environment.ml.yml    # AI conda env: torch cu124, opencv, ultralytics 등
-  Dockerfile.pf-base    # pia/pf-base: python:3.12-slim + node (플랫폼, GPU/torch/conda 없음)
+  Dockerfile.pf-base    # pia/pf-base: python:3.12-slim + node + sshd + PG/Redis (GPU/torch 없음)
   Dockerfile.pf         # pia/pf-<user>: FROM pia/pf-base + 계정 (~1초)
   requirements.pf.txt   # 플랫폼 pip 의존성: fastapi/uvicorn/httpx (conda 없음 · venv)
+  sshd_config_42dev.conf # ⭐ 컨테이너 sshd 설정(키 인증만 · 직결 접속)
+  devstores.sh          # ⭐ 컨테이너 안 개인 PG/Redis(로컬 프로세스) — /usr/local/bin/devstores
 scripts/
   build_ml_base.sh      # pia/ml-base 빌드 (AI · 최초 1회 / environment.ml.yml 변경 시)
   build_pf_base.sh      # pia/pf-base 빌드 (플랫폼 · 최초 1회 / requirements.pf.txt 변경 시)
-  provision_ml.sh       # AI(ml-) 온보딩: 계정 + GPU 컨테이너 (base 없으면 자동 빌드)
-  provision_pf.sh       # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 서비스망 연결
+  provision_ml.sh       # AI(ml-) 온보딩: 계정 + GPU 컨테이너 + 컨테이너 sshd 포트 노출
+  provision_pf.sh       # 플랫폼(pf-) 온보딩: 계정 + GPU없는 컨테이너 + 컨테이너 sshd 포트
   deprovision.sh        # 오프보딩: ml-/pf-/dev- 컨테이너·이미지 제거 + 계정 잠금
-  dev_stores.sh         # 개발자용: 개인 PG/Redis(쓰기 격리) up/down/info
+  devnet_firewall.sh    # ⭐ 격리 네트워크 devnet + egress 방화벽(사설망·호스트 차단/인터넷 허용)
+  dev_stores.sh         # ⛔ DEPRECATED → 컨테이너 안 devstores 사용
 compose/
-  dev-stores.yml         # 개인용 postgres + redis (dev_stores.sh 가 실행)
+  dev-stores.yml         # ⛔ DEPRECATED (host-level 개인 스토어 폐지)
 docs/
   REQUEST-ACCESS.md      # 신규 개발자용: SSH 키 발급 + 환경 신청서
   ONBOARDING.md          # 개발자용: 발급 후 접속·VS Code·공용 서버 수칙
@@ -66,12 +69,15 @@ sudo ./scripts/provision_ml.sh mkim  keys/mkim.pub  2,3    # 특정 GPU 만
 sudo ./scripts/provision_pf.sh jihoon keys/jihoon.pub
 ```
 
-개발자 접속 동선:
+개발자 접속 동선 — ⭐ 호스트가 아니라 '컨테이너 sshd'로 직접 (격리 접속 모델):
 
 ```
-ssh dhkim@<42서버>  →  docker exec -it ml-dhkim bash   (conda dev env 자동 활성화)
-VS Code: Remote-SSH 접속 → "Dev Containers: Attach to Running Container" → ml-dhkim
+ssh -p <ssh포트> dhkim@<42서버>   →  바로 컨테이너 안 셸 (conda dev env 자동)
+VS Code: Remote-SSH 로 <42서버>:<ssh포트> 를 '원격 호스트'로 추가해 접속
 ```
+발급 시 배정된 `<ssh포트>`(2200~2299)는 provision 출력·GPU/포트 대장에서 확인.
+호스트 계정은 nologin·docker 그룹 미부여 → 개발자는 **호스트 daemon 에 손댈 수 없다**
+(옛 `ssh 호스트 → docker exec` 모델은 호스트 docker 권한을 요구했고, 그게 오염 경로였다).
 
 ## GPU 운영 정책
 
@@ -194,13 +200,30 @@ sudo docker rm -f ml-dhkim && sudo ./scripts/provision_ml.sh dhkim keys/dhkim.pu
 공유 write 를 자주 한다면(같은 파일을 여러 명이 수정) 개발자 셸 `umask 002` 를 권장
 (기본 022 는 그룹에 read 만 준다). 서로 다른 파일을 만드는 일반적 경우엔 불필요.
 
-## 보안 메모 (합의된 트레이드오프)
+## 보안 · 격리 모델 (⭐ 2026-08-28 개정 — 호스트 격리)
 
-- **docker 그룹 = 호스트 root 등가.** 개발자 전원이 서로의 컨테이너·호스트에
-  접근 가능하다. 10인 신뢰 팀 전제의 절충이며, 격리가 필요해지면
-  rootless docker 또는 admin 발급 전용(sudoers 로 `docker exec` 만 허용)으로 전환.
+예전 모델은 **개발자를 docker 그룹(=호스트 root 등가)에 넣고** 호스트에 SSH 시킨 뒤
+`docker exec` 로 컨테이너에 들어가게 했다. 이 호스트 docker 권한이 `piascope-jordan-*`
+같은 **호스트 레벨 병렬 스택**(공유 인프라 꼬임)의 근본 원인이었다. 이제:
+
+- **개발자는 docker 그룹에 없다** — provision 이 오히려 제거한다(`gpasswd -d`). 호스트
+  daemon·sibling 컨테이너 발급이 **구조적으로 불가**.
+- **호스트 셸 = nologin** — `ssh user@42`(호스트 22)로는 셸을 못 얻는다. 접속은 오직
+  **컨테이너 sshd**(발급 포트 2200~2299)로만 → 개발자는 자기 격리 샌드박스로 바로 떨어진다.
+- **개인 테스트 인프라는 컨테이너 안**(`devstores`) 로컬 프로세스로. 호스트에 개인
+  PG/Redis 를 띄우던 옛 `dev_stores.sh`(host-level)는 폐지.
+- **네트워크 격리** — 개발 컨테이너는 전용 `devnet`(icc=false)에만 붙고, egress 방화벽이
+  **사설망(piascope 인프라·타 컨테이너·사내 LAN)·호스트를 차단**하며 **인터넷만 허용**한다
+  (`devnet_firewall.sh`). 이름뿐 아니라 raw IP 로도 공유 인프라에 못 닿는다 → dev 데이터
+  오염 경로 차단. 읽기전용 공유 의존이 필요하면 `EGRESS_NETWORK` 로 명시 연결(그 트래픽만 예외).
+- 컨테이너 '안'의 sudo(root)는 유지 — 샌드박스라 호스트에 영향 없음.
 - 계정은 비밀번호 잠금 + SSH 키 인증만. 오프보딩 = `deprovision.sh`.
-- 42 서버가 사내망 전용이 아니라면 SSH 포트 공개 대신 VPN/Tailscale 경유 권장.
+- 42 서버가 사내망 전용이 아니라면 SSH 포트(호스트 22 + 컨테이너 22xx) 공개 대신
+  VPN/Tailscale 경유 권장.
+
+> 남은 신뢰 전제: mlteam 공유 홈/weight 는 여전히 팀 공유(파일 협업용). GPU 는
+> `--gpus device=N` 으로 컨테이너 레벨 격리. 방화벽 규칙은 재부팅 시 사라지니
+> `netfilter-persistent save` 또는 부팅 훅으로 영속화할 것.
 
 ## 라이선스 메모
 
@@ -212,7 +235,9 @@ sudo docker rm -f ml-dhkim && sudo ./scripts/provision_ml.sh dhkim keys/dhkim.pu
 
 ## 다음 단계 (합의된 로드맵)
 
-1. ✅ 계정 분리 + 개발자별 컨테이너 + VS Code attach (이 리포)
-2. `.devcontainer/devcontainer.json` 을 서비스 리포에 추가해 attach 후 확장/설정 자동화
-3. GPU 경합 발생 시 개발/학습 GPU 풀 분리 + DCGM-exporter 모니터링
-4. 학습 잡 대기가 병목이 되면 스케줄러(Slurm/Ray) 도입 검토
+1. ✅ 계정 분리 + 개발자별 컨테이너 + VS Code Remote-SSH (이 리포)
+2. ✅ 호스트 격리(docker 그룹 제거 · nologin · 컨테이너 sshd 직결 · devstores) — 2026-08-28
+3. ✅ 네트워크 격리(devnet + egress 방화벽: 사설망·호스트 차단/인터넷 허용) — `devnet_firewall.sh`
+4. `.devcontainer/devcontainer.json` 을 서비스 리포에 추가해 접속 후 확장/설정 자동화
+5. (선택) rootless/sysbox 런타임(컨테이너 안 docker 를 안전하게) · 재부팅 후 방화벽 규칙 영속화 자동화
+6. GPU 경합 시 개발/학습 GPU 풀 분리 + DCGM-exporter · 학습 대기 병목 시 스케줄러(Slurm/Ray)

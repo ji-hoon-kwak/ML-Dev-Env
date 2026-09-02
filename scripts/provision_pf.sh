@@ -5,11 +5,15 @@
 # AI 컨테이너와의 차이:
 #   - GPU 미할당 (플랫폼은 모델을 직접 안 돌리고 AI 서비스를 HTTP 호출만 함)
 #   - torch/CUDA 없음 · Node.js 있음 (Next.js FE)
-#   - piascope 서비스 네트워크에 자동 연결 → gateway/FE 가 postgres/redis/milvus/
-#     ssave-scene/ssave-fg/trace-api 를 서비스명으로 접근(배포 .env.dev 재사용 가능)
+#
+# ⭐ 격리 접속 모델은 ml 과 동일: docker 그룹 미부여 · 호스트 nologin · 컨테이너 sshd 직결.
+#    플랫폼은 scene/fg/trace 를 HTTP 로 '읽기 소비'하므로 공유 서비스 접근이 정당하다 →
+#    그 경우 EGRESS_NETWORK=<piascope net> 로 명시 연결(읽기전용 외부 의존 예외).
+#    상태를 쓰는 gateway 개발용 PG/Redis 는 컨테이너 안 devstores 로.
 #
 # 사용법 (42 서버에서 admin/sudo 로 실행):
 #   sudo ./provision_pf.sh <username> <pubkey-file>
+#   옵션(env): SSH_PORT=2211 · EGRESS_NETWORK=<piascope net>(공유 AI서비스 HTTP 소비 시)
 set -euo pipefail
 
 # ---- 팀 공통 설정 (필요 시 수정) ----
@@ -19,8 +23,13 @@ WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
 LIBS_DIR="/data/libs"                # 공유 라이브러리 (read-only 마운트)
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID
-# 플랫폼 서비스가 붙을 piascope compose 네트워크. 비워두면 자동 감지(실행 중 gateway 기준).
-SERVICE_NETWORK="${SERVICE_NETWORK:-}"
+# 공유 네트워크 기본 미연결(격리). 공유 AI서비스(scene/fg/trace) HTTP 소비가 필요할 때만
+# EGRESS_NETWORK=<piascope net> 로 명시 연결(읽기전용 외부 의존 예외).
+EGRESS_NETWORK="${EGRESS_NETWORK:-}"
+DEVNET="${DEVNET:-devnet}"           # 격리 네트워크(egress 방화벽 · scripts/devnet_firewall.sh). bridge=격리 약화
+SSH_PORT="${SSH_PORT:-}"              # 컨테이너 sshd 호스트 포트(생략 시 자동 배정)
+SSH_PORT_RANGE_LOW=2200
+SSH_PORT_RANGE_HIGH=2299
 CPUS="8"                             # 플랫폼은 학습 안 하니 AI(16)보다 가볍게
 MEMORY="32g"
 # -------------------------------------
@@ -56,14 +65,15 @@ else
     MLTEAM_GID="$(getent group "$MLTEAM_GROUP" | cut -d: -f3)"
 fi
 
-# ---- 1. 계정 생성 (기본 그룹 = mlteam) ----
+# ---- 1. 계정 생성 (기본 그룹 = mlteam · 호스트 셸 nologin) ----
+# 호스트 로그인 차단 → 접속은 오직 컨테이너 sshd 로만(호스트 docker 에 손 못 댐).
 if id "$USERNAME" &>/dev/null; then
     echo "[skip] 계정 $USERNAME 이미 존재"
-    usermod -g "$MLTEAM_GROUP" "$USERNAME"
+    usermod -g "$MLTEAM_GROUP" -s /usr/sbin/nologin "$USERNAME"
 else
-    useradd -m -g "$MLTEAM_GROUP" -s /bin/bash "$USERNAME"
+    useradd -m -g "$MLTEAM_GROUP" -s /usr/sbin/nologin "$USERNAME"
     passwd -l "$USERNAME"
-    echo "[ok] 계정 생성: $USERNAME (기본 그룹=$MLTEAM_GROUP)"
+    echo "[ok] 계정 생성: $USERNAME (기본 그룹=$MLTEAM_GROUP · 호스트 nologin)"
 fi
 
 HOME_DIR="$(getent passwd "$USERNAME" | cut -d: -f6)"
@@ -82,9 +92,8 @@ chown "$USERNAME:$MLTEAM_GROUP" "$HOME_DIR/.ssh/authorized_keys"
 chmod 600 "$HOME_DIR/.ssh/authorized_keys"
 echo "[ok] SSH 공개키 등록"
 
-# ---- 2. docker 그룹 ----
-usermod -aG docker "$USERNAME"
-echo "[ok] docker 그룹 추가 (주의: 호스트 root 등가 권한)"
+# ---- 2. docker 그룹 '제거' (호스트 daemon 오염 경로 차단) ----
+gpasswd -d "$USERNAME" docker 2>/dev/null && echo "[ok] docker 그룹에서 제거" || echo "[ok] docker 그룹 비소속(정상)"
 
 # ---- 공유 디렉터리 정렬 ----
 mkdir -p "$WEIGHTS_DIR" "$LIBS_DIR"
@@ -113,6 +122,29 @@ if docker inspect "$CONTAINER" &>/dev/null; then
     echo "       docker rm -f $CONTAINER" >&2
 else
     install -d -o "$USERNAME" -g "$MLTEAM_GROUP" "$HOME_DIR/work"
+
+    # ---- 컨테이너 sshd 호스트 포트 배정 ----
+    if [[ -z "$SSH_PORT" ]]; then
+        USED_PORTS="$(docker ps -q | xargs -r docker inspect \
+            --format '{{range $p,$c := .NetworkSettings.Ports}}{{range $c}}{{.HostPort}} {{end}}{{end}}' 2>/dev/null || true)"
+        for p in $(seq "$SSH_PORT_RANGE_LOW" "$SSH_PORT_RANGE_HIGH"); do
+            if ! grep -qw "$p" <<<"$USED_PORTS" && ! ss -ltn 2>/dev/null | grep -q ":$p "; then
+                SSH_PORT="$p"; break
+            fi
+        done
+    fi
+    if [[ -z "$SSH_PORT" ]]; then
+        echo "ERROR: 빈 SSH 포트를 못 찾음(${SSH_PORT_RANGE_LOW}-${SSH_PORT_RANGE_HIGH}). SSH_PORT=<port> 로 지정." >&2
+        exit 1
+    fi
+
+    # ---- 격리 네트워크 보장 ----
+    if [[ "$DEVNET" != "bridge" ]] && ! docker network inspect "$DEVNET" &>/dev/null; then
+        echo "[warn] '$DEVNET' 네트워크가 없습니다 — 먼저: sudo ./scripts/devnet_firewall.sh up" >&2
+        echo "       (격리 약화 상태로 강행하려면 DEVNET=bridge 로 재실행)" >&2
+        exit 1
+    fi
+
     DATASET_MOUNT=()
     [[ -d "$DATASETS_DIR" ]] && DATASET_MOUNT=(-v "$DATASETS_DIR":/datasets:ro)
 
@@ -122,32 +154,30 @@ else
         --group-add "$MLTEAM_GID" \
         --label "owner=${USERNAME}" \
         --label "role=platform" \
+        --network "$DEVNET" \
+        -p "${SSH_PORT}:22" \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
         -v "$LIBS_DIR":/libs:ro \
         "${DATASET_MOUNT[@]}" \
         -w "/home/${USERNAME}/work" \
         "$IMAGE"
-    echo "[ok] 컨테이너 실행: $CONTAINER (GPU 없음 · CPU=${CPUS} · MEM=${MEMORY})"
+    echo "[ok] 컨테이너 실행: $CONTAINER (GPU 없음 · CPU=${CPUS} · MEM=${MEMORY} · sshd 포트=${SSH_PORT})"
 fi
 
-# ---- 4-bis. piascope 서비스 네트워크에 연결 ----
-# gateway/FE 가 postgres·redis·milvus·ssave-scene·ssave-fg·trace-api 를 '서비스명'으로
-# 접근하려면 같은 docker 네트워크에 있어야 한다(배포 .env.dev 를 그대로 재사용 가능).
-if [[ -z "$SERVICE_NETWORK" ]]; then
-    # 실행 중인 piascope-gateway 가 붙어 있는 네트워크를 자동 감지
-    SERVICE_NETWORK="$(docker inspect piascope-gateway \
-        --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-        | grep -v '^$' | head -1 || true)"
-fi
-if [[ -n "$SERVICE_NETWORK" ]] && docker network inspect "$SERVICE_NETWORK" &>/dev/null; then
-    if ! docker inspect "$CONTAINER" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | grep -qw "$SERVICE_NETWORK"; then
-        docker network connect "$SERVICE_NETWORK" "$CONTAINER"
+# ---- 4-bis. (선택) 공유 AI서비스 HTTP 소비용 egress — 기본은 '연결 안 함'(격리) ----
+# 플랫폼은 scene/fg/trace 를 HTTP 로 '읽기 소비'하므로 이 연결이 정당한 경우가 많다.
+# 필요하면 EGRESS_NETWORK 로 명시 연결(서비스명 DNS + .env.dev URL 재사용).
+# ⚠️ gateway 개발용으로 상태를 쓰는 PG/Redis 는 공유 대신 컨테이너 안 devstores 로.
+if [[ -n "$EGRESS_NETWORK" ]]; then
+    if docker network inspect "$EGRESS_NETWORK" &>/dev/null; then
+        docker network connect "$EGRESS_NETWORK" "$CONTAINER" 2>/dev/null || true
+        echo "[ok] egress 네트워크 연결(공유 AI서비스 HTTP 소비): $EGRESS_NETWORK"
+    else
+        echo "[warn] EGRESS_NETWORK=$EGRESS_NETWORK 없음 — 연결 생략"
     fi
-    echo "[ok] 서비스 네트워크 연결: $SERVICE_NETWORK (서비스명 DNS 사용 가능)"
 else
-    echo "[warn] 서비스 네트워크를 못 찾음 — 호스트 IP+공개포트로 접근하거나"
-    echo "       SERVICE_NETWORK=<네트워크명> sudo -E $0 ... 로 재실행"
+    echo "[ok] 공유 네트워크 미연결(격리). 필요 시 EGRESS_NETWORK=<net> 로 재발급."
 fi
 
 # ---- 5. venv PATH snippet (호스트 ~/.bashrc — 컨테이너 안에서만 발동) ----
@@ -171,12 +201,12 @@ fi
 cat <<EOF
 
 === 플랫폼 발급 완료: $USERNAME ===
-접속 안내 (개발자에게 전달):
-  1) ssh ${USERNAME}@<42서버주소>
-  2) docker exec -it ${CONTAINER} bash    # /opt/venv 활성 (python + node, conda 없음)
-  VS Code: Remote-SSH 접속 후 "Attach to Running Container" → ${CONTAINER}
+접속 안내 (개발자에게 전달) — ⭐ 호스트가 아니라 '컨테이너'로 직접 접속:
+  ssh -p ${SSH_PORT} ${USERNAME}@<42서버주소>     # 바로 컨테이너 안 셸(/opt/venv: python+node)
+  VS Code: Remote-SSH 로 <42서버주소>:${SSH_PORT} 를 '원격 호스트'로 추가해 접속
+  (호스트 docker·docker exec 불필요 — 호스트 로그인은 막혀 있음)
 
-구성: GPU 없음 · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP} · 네트워크=${SERVICE_NETWORK:-(수동)}
+구성: GPU 없음 · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP} · sshd포트=${SSH_PORT} · net=${DEVNET}(사설망·호스트 차단) · egress=${EGRESS_NETWORK:-(없음)}
 마운트: 홈=${HOME_DIR} · weights=/weights(rw) · libs=/libs(ro) · datasets=/datasets(ro)
 
 개발 흐름 (컨테이너 안):
@@ -184,8 +214,7 @@ cat <<EOF
   pip install -e .                                   # light (torch 없음) — gateway
   uvicorn gateway.api.main:app --host 0.0.0.0 --port 3105 --reload
   cd ui/apps/scope && npm install && npm run dev -- --port 3405
-  # 인프라는 공유 스택에 붙는다: 서비스명(postgres/redis/milvus/piascope-ssave-scene…)
-  #   또는 호스트 10.128.30.42 + 공개포트. INTERNAL_SERVICE_SECRET·SSAVE_*_URL·
-  #   TRACE_API_URL 은 배포 .env.dev 값 재사용. 포트는 3100/3401/8001 과 겹치지 않게.
-  # ⚠️ M3 검증(8/19~28) 기간엔 공유 PG/Milvus 에 '쓰기' 금지 — 개인 저장소로 격리.
+  # gateway 개발용 PG/Redis 는 컨테이너 안에서:  devstores up  (127.0.0.1:5432 / :6379)
+  # 공유 AI서비스(scene/fg/trace) 를 HTTP 로 소비하려면 EGRESS_NETWORK 로 재발급 후
+  #   서비스명 DNS + 배포 .env.dev 의 SSAVE_*_URL·TRACE_API_URL·INTERNAL_SERVICE_SECRET 재사용.
 EOF

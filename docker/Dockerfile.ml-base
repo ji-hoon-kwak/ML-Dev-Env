@@ -13,10 +13,22 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # --- OS 패키지 ---
 # libgl1/libglib2.0-0: opencv-python 이 headless 서버에서 import 되려면 필요
+# openssh-server: ⭐ 개발자가 '호스트가 아니라 이 컨테이너'로 직접 SSH 접속(격리 접속 모델).
+# redis-server / postgresql: 개인 테스트 저장소를 컨테이너 안 로컬 프로세스로(devstores).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        sudo git wget curl ca-certificates openssh-client \
+        sudo git wget curl ca-certificates openssh-client openssh-server \
+        redis-server postgresql postgresql-contrib \
         libgl1 libglib2.0-0 tmux htop vim \
     && rm -rf /var/lib/apt/lists/*
+
+# --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---
+# 호스트 sshd 가 아니라 컨테이너 sshd 로 붙으므로 개발자는 호스트 docker 접근이 필요없다
+# → 호스트 daemon 오염 경로(piascope-jordan-* 류) 자체가 사라진다.
+COPY sshd_config_42dev.conf /etc/ssh/sshd_config.d/42dev.conf
+COPY devstores.sh /usr/local/bin/devstores
+RUN mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && chmod 0755 /usr/local/bin/devstores
 
 # --- Miniforge (conda) ---
 RUN wget -qO /tmp/miniforge.sh \
@@ -41,4 +53,7 @@ RUN groupadd -g "${MLTEAM_GID}" mlteam \
 # 활성화는 (a) 아래 PATH 기본값 + (b) provision_ml.sh 의 호스트 ~/.bashrc snippet.
 ENV PATH=/opt/conda/envs/dev/bin:/opt/conda/bin:$PATH
 
-CMD ["sleep", "infinity"]
+# pid1 = sshd(포그라운드). 개발자는 컨테이너 sshd 로 직접 들어와 작업한다.
+# (예전 `sleep infinity` + 호스트 `docker exec` 모델은 호스트 docker 접근을 요구했다 →
+#  그게 오염 경로였다. 이제 호스트 docker 없이 접속 가능.)
+CMD ["/usr/sbin/sshd", "-D", "-e"]

@@ -14,13 +14,23 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # --- OS 패키지 + Node 20 (NodeSource) — FE(Next.js). corepack 로 pnpm. ---
 # build-essential: 일부 pip 의존성이 소스 빌드로 폴백할 때 대비(대개 wheel 사용).
+# openssh-server: ⭐ 개발자가 '호스트가 아니라 이 컨테이너'로 직접 SSH 접속(격리 접속 모델).
+# redis-server / postgresql: gateway 로컬 개발용 개인 저장소를 컨테이너 안 프로세스로(devstores).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        sudo git curl ca-certificates gnupg openssh-client build-essential \
+        sudo git curl ca-certificates gnupg openssh-client openssh-server build-essential \
+        redis-server postgresql postgresql-contrib \
         tmux htop vim \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && corepack enable \
     && rm -rf /var/lib/apt/lists/*
+
+# --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---
+COPY sshd_config_42dev.conf /etc/ssh/sshd_config.d/42dev.conf
+COPY devstores.sh /usr/local/bin/devstores
+RUN mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && chmod 0755 /usr/local/bin/devstores
 
 # --- mlteam 그룹 + 공용 venv(group-writable) ---
 # venv 를 /opt/venv(홈 밖)에 두는 이유: 홈은 호스트 볼륨으로 덮이므로 홈 안에 만들면
@@ -36,7 +46,8 @@ RUN groupadd -g "${MLTEAM_GID}" mlteam \
     && chmod -R g+w /opt/venv \
     && mkdir -p /workspace && chown root:"${MLTEAM_GID}" /workspace && chmod 2775 /workspace
 
-# venv 를 PATH 기본값으로 — docker exec 셸에 python/uvicorn 즉시 노출.
+# venv 를 PATH 기본값으로 — 셸에 python/uvicorn 즉시 노출.
 ENV PATH=/opt/venv/bin:$PATH
 
-CMD ["sleep", "infinity"]
+# pid1 = sshd(포그라운드). 개발자는 컨테이너 sshd 로 직접 들어와 작업한다.
+CMD ["/usr/sbin/sshd", "-D", "-e"]

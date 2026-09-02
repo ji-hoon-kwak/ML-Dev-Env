@@ -11,12 +11,13 @@
 FROM pia/ml-base
 
 # primary group = mlteam (base 에서 생성) → /home·/weights bind-mount 소유권이 호스트와 일치.
+# 컨테이너 안 sudo 는 유지: 이 컨테이너는 개발자의 격리 샌드박스다(호스트엔 못 닿는다).
 ARG USERNAME=dev
 ARG UID=1000
 RUN useradd -m -u "${UID}" -g mlteam -s /bin/bash "${USERNAME}" \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-"${USERNAME}" \
     && chmod 440 /etc/sudoers.d/90-"${USERNAME}"
 
-USER ${USERNAME}
+# ⚠️ USER 전환/CMD 재정의 없음: pid1 은 base 의 sshd(root)여야 한다. 개발자는 컨테이너
+#    sshd 로 로그인하면 자기 계정 셸(bash)로 떨어진다(sshd 가 인증 후 권한 강하).
 WORKDIR /workspace
-CMD ["sleep", "infinity"]

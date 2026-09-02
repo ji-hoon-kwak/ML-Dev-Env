@@ -1,54 +1,17 @@
 #!/usr/bin/env bash
-# 개인용 PG/Redis(쓰기 격리) 관리 — 개발자가 42 호스트에서 직접 실행.
-#   sudo 불필요(docker 그룹). piascope 서비스 네트워크는 자동 감지.
+# ⛔ DEPRECATED — 이 스크립트는 더 이상 쓰지 않는다.
 #
-# 사용법:
-#   ./dev_stores.sh up     [user]   # 개인 pg-<user>/redis-<user> 기동
-#   ./dev_stores.sh info   [user]   # 접속 정보 출력
-#   ./dev_stores.sh down   [user]   # 중지(데이터 볼륨 보존)
-#   ./dev_stores.sh purge  [user]   # 중지 + 데이터 볼륨 삭제(되돌릴 수 없음)
-#   user 생략 시 현재 로그인 계정.
-set -euo pipefail
-
-CMD="${1:-info}"
-USER_NAME="${2:-$(id -un)}"
-COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose/dev-stores.yml"
-PROJECT="dev-stores-${USER_NAME}"
-
-# piascope 서비스 네트워크 자동 감지(dev 컨테이너가 붙어 있는 그 네트워크)
-NET="${SERVICE_NETWORK:-$(docker inspect piascope-gateway \
-    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-    | grep -v '^$' | head -1 || true)}"
-if [[ -z "$NET" ]]; then
-    echo "ERROR: piascope 서비스 네트워크를 못 찾음. SERVICE_NETWORK=<네트워크명> 으로 지정하세요." >&2
-    exit 1
-fi
-
-export DEV_USER="$USER_NAME" SERVICE_NETWORK="$NET"
-
-case "$CMD" in
-  up)
-    docker compose -f "$COMPOSE" -p "$PROJECT" up -d
-    echo "[ok] pg-${USER_NAME} · redis-${USER_NAME} 기동 (net=${NET})"
-    echo "     컨테이너 안에서: PG=pg-${USER_NAME}:5432 (user=dev pw=dev db=dev) · Redis=redis-${USER_NAME}:6379"
-    ;;
-  down)
-    docker compose -f "$COMPOSE" -p "$PROJECT" down
-    echo "[ok] 중지(볼륨 pgdata-${USER_NAME} 보존)"
-    ;;
-  purge)
-    docker compose -f "$COMPOSE" -p "$PROJECT" down -v
-    echo "[ok] 중지 + 볼륨 삭제"
-    ;;
-  info)
-    echo "network=${NET}"
-    echo "컨테이너 안(ml-/pf-)에서: PG=pg-${USER_NAME}:5432 (user/pw/db=dev) · Redis=redis-${USER_NAME}:6379"
-    echo "호스트 포트(GUI 등):"
-    docker port "pg-${USER_NAME}" 2>/dev/null || echo "  (pg-${USER_NAME} 미기동 — 먼저 up)"
-    docker port "redis-${USER_NAME}" 2>/dev/null || true
-    ;;
-  *)
-    echo "usage: $0 <up|info|down|purge> [user]" >&2
-    exit 1
-    ;;
-esac
+# 예전에는 개인 PG/Redis 를 '호스트 레벨 sibling 컨테이너'로 띄우고 공유 piascope
+# 네트워크에 붙였다 → 그게 바로 우리가 없애려는 '호스트 인프라 꼬임'의 축소판이었다
+# (docker ps 오염 · 호스트 포트 점유 · 공유망 결합). 게다가 새 격리 모델에서는
+# 개발자에게 docker 그룹이 없어서 이 스크립트 자체가 동작하지 않는다.
+#
+# ✅ 대체: 개인 테스트 인프라는 '컨테이너 안'에서 로컬 프로세스로 띄운다.
+#     (컨테이너에 ssh 로 접속한 뒤)
+#       devstores up      # 127.0.0.1:6379(redis) · 127.0.0.1:5432(pg, db=dev)
+#       devstores info | status | down | reset
+#
+# 배경: docs/shared-infra-rules.md (상태 생산 의존 = 컨테이너 안 · 공유는 읽기전용 예외)
+echo "⛔ dev_stores.sh 는 폐지됐습니다. 컨테이너 안에서 'devstores up' 을 쓰세요." >&2
+echo "   (호스트 레벨 개인 스토어는 인프라 꼬임의 원인이라 제거됨 — shared-infra-rules.md)" >&2
+exit 1

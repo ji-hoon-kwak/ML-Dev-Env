@@ -3,42 +3,45 @@
 > 아직 계정 발급 전이라면 먼저 [`REQUEST-ACCESS.md`](REQUEST-ACCESS.md) (SSH 키 발급 + 신청서).
 > 이 문서는 **발급 완료 후 접속**을 다룬다.
 
-발급이 완료되면 아래 3가지를 전달받는다: **계정명** · **서버 주소** · (본인이 제출한 SSH 키).
+발급이 완료되면 아래 4가지를 전달받는다: **계정명** · **서버 주소** · **컨테이너 sshd 포트**(2200~2299) · (본인이 제출한 SSH 키).
+
+> ⭐ **접속 모델(2026-08-28 변경)**: 이제 호스트가 아니라 **본인 컨테이너에 SSH 로 직접**
+> 붙는다. `ssh` 한 번이면 컨테이너 안 셸이다 — 예전의 `docker exec` 단계는 없다(개발자에겐
+> 호스트 docker 권한이 없다). 그래서 config 에 **`Port <배정포트>`** 한 줄이 추가된다.
 
 ## 1. 최초 1회 설정
 
-로컬 `~/.ssh/config` 에 **아래 블록을 그대로** 추가한다 (계정명만 치환).
-⚠️ 별칭은 `gpu42` 로 통일할 것 — `tmp`·`TRACE_SSAVE_MK` 처럼 제각각 지으면
-나중에 서로 도와주기 어렵고 오타로 접속이 깨진다.
+로컬 `~/.ssh/config` 에 **아래 블록을 그대로** 추가한다 (계정명·포트만 치환).
+⚠️ 별칭은 `gpu42` 로 통일할 것 — 제각각 지으면 서로 돕기 어렵고 오타로 접속이 깨진다.
 
 ```
 Host gpu42
     HostName 10.128.30.42
     User <본인계정>            # 예: dhkim  (반드시 본인 계정)
+    Port <배정포트>            # ⭐ 발급 시 받은 컨테이너 sshd 포트 (예: 2205)
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-- **HostName 은 반드시 실제 IP** (`10.128.30.42`). 이 줄이 없거나 틀리면 ssh 가
-  별칭 문자열을 호스트명으로 착각해 `Could not resolve hostname` 로 죽는다.
+- **HostName 은 반드시 실제 IP** (`10.128.30.42`).
+- **Port 를 빠뜨리면** 호스트(22)로 붙어 `nologin` 으로 즉시 끊긴다 → 반드시 배정포트를 넣는다.
 - macOS 에서 키에 passphrase 가 있으면 매번 안 묻게 keychain 에 한 번 등록:
   ```bash
   ssh-add --apple-use-keychain ~/.ssh/id_ed25519
   ```
 
-접속 확인:
+접속 확인 (한 번에 컨테이너 안):
 
 ```bash
-ssh gpu42
-docker exec -it <ml|pf>-<본인계정> bash   # 접두사: ml=AI, pf=플랫폼 · 프롬프트에 (dev) env 활성화
-python -c "import torch; print(torch.cuda.is_available())"   # True 확인
+ssh gpu42                                                    # 바로 컨테이너 셸 (dev env 활성)
+python -c "import torch; print(torch.cuda.is_available())"   # (ml) True 확인
 ```
 
 ## 2. VS Code 로 개발하기
 
-1. 로컬 VS Code 에 확장 설치: **Remote - SSH**, **Dev Containers**
+1. 로컬 VS Code 에 확장 설치: **Remote - SSH**
 2. `Cmd+Shift+P` → `Remote-SSH: Connect to Host` → `gpu42`
-3. 열린 원격 창에서 `Cmd+Shift+P` → `Dev Containers: Attach to Running Container` → `<ml|pf>-<본인계정>` (ml=AI · pf=플랫폼)
-4. 폴더 열기: `/home/<본인계정>/work`
+   (컨테이너에 '원격 호스트'로 바로 붙는다 — Dev Containers Attach 단계 없음)
+3. 폴더 열기: `/home/<본인계정>/work`
 
 이후에는 VS Code 좌하단 초록 버튼 → Recent 에서 바로 재접속된다.
 
@@ -67,9 +70,11 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 이 서버는 **PIA Scope dev 배포 스택이 같이 떠 있는 공용 서버**다
 (`piascope-*` 컨테이너 = gateway·UI·검색 서비스·DB·Milvus 등 — 데모/검증에 사용 중).
 
-> ⭐ 인프라(Milvus·PG·ES·Redis…) **쓰기 규칙은 [`shared-infra-rules.md`](shared-infra-rules.md)**
-> 를 반드시 먼저 읽는다 — 핵심은 "읽기는 자유, 쓰기는 `dev_<본인계정>` 네임스페이스로 격리".
+> ⭐ 인프라 규칙은 [`shared-infra-rules.md`](shared-infra-rules.md) 를 먼저 읽는다 — 핵심은
+> "**상태를 쓰는 의존(PG·Redis)은 내 컨테이너 안 `devstores` 로, 공유는 읽기전용**".
 > 인덱싱/마이그레이션이 데모 데이터를 오염시키면 완성 판정이 깨진다.
+
+> 개인 테스트 저장소는 컨테이너 안에서: `devstores up` → `127.0.0.1:5432`(pg)·`127.0.0.1:6379`(redis).
 
 1. **`piascope-*` 컨테이너를 절대 건드리지 않는다** — stop/rm/restart 금지.
    서비스 스택 조작은 배포 담당만 한다.
@@ -93,9 +98,9 @@ python -c "import torch; print(torch.cuda.is_available())"   # True 확인
 프롬프트가 뜨면 무조건 실패한다 = 키 인증이 안 먹은 것). 서버가 아니라 **접속하는
 쪽**을 먼저 의심한다.
 
-**자가진단 — config 를 통째로 무시하고 붙어본다:**
+**자가진단 — config 를 통째로 무시하고 붙어본다** (배정포트를 `-p` 로 직접):
 ```bash
-ssh -F /dev/null -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
+ssh -F /dev/null -p <배정포트> -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
 ```
 - **이게 되면** → 서버·계정·키는 정상. 범인은 100% 로컬 `~/.ssh/config` 별칭.
   §1 표준 블록으로 `Host gpu42` 를 다시 만들고 `ssh gpu42` 로 재시도.
@@ -114,7 +119,8 @@ ssh -F /dev/null -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
 
 ### 그 외
 
-- 컨테이너가 죽어 있음: `ssh gpu42` 후 `docker start <ml|pf>-<계정>` (재부팅 후 자동 시작이 안 됐을 때)
+- 컨테이너가 죽어 있음(= `ssh gpu42` 자체가 안 됨): 컨테이너는 `--restart unless-stopped`
+  로 자동 재시작된다. 그래도 안 뜨면 admin(@jhkwak)에게 요청(개발자는 호스트 docker 권한 없음).
 - 첫 Remote-SSH 접속이 오래 걸림: VS Code 확장(Python·Jupyter) 최초 설치 중 —
   멈춘 게 아니니 기다린다. 두 번째부터는 즉시 붙는다.
 - 그 외: admin(@jhkwak) 에게. 컨테이너 재발급은 홈 데이터를 건드리지 않는다.
