@@ -9,6 +9,8 @@
 > 붙는다. `ssh` 한 번이면 컨테이너 안 셸이다 — 예전의 `docker exec` 단계는 없다(개발자에겐
 > 호스트 docker 권한이 없다). 그래서 config 에 **`Port <배정포트>`** 한 줄이 추가된다.
 
+> 📍 `<DEV_SERVER_IP>` = 42 dev 서버 IP (사설망 · 외부 접근 불가). 실제 값은 발급 시 admin 이 안내한다.
+
 ## 1. 최초 1회 설정
 
 로컬 `~/.ssh/config` 에 **아래 블록을 그대로** 추가한다 (계정명·포트만 치환).
@@ -16,13 +18,13 @@
 
 ```
 Host gpu42
-    HostName 10.128.30.42
+    HostName <DEV_SERVER_IP>
     User <본인계정>            # 예: dhkim  (반드시 본인 계정)
     Port <배정포트>            # ⭐ 발급 시 받은 컨테이너 sshd 포트 (예: 2205)
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-- **HostName 은 반드시 실제 IP** (`10.128.30.42`).
+- **HostName 은 발급 시 받은 42 dev 서버 IP** — `<DEV_SERVER_IP>` 자리에 실제 값을 넣는다(사설망 IP).
 - **Port 를 빠뜨리면** 호스트(22)로 붙어 `nologin` 으로 즉시 끊긴다 → 반드시 배정포트를 넣는다.
 - macOS 에서 키에 passphrase 가 있으면 매번 안 묻게 keychain 에 한 번 등록:
   ```bash
@@ -100,7 +102,7 @@ python -c "import torch; print(torch.cuda.is_available())"   # (ml) True 확인
 
 **자가진단 — config 를 통째로 무시하고 붙어본다** (배정포트를 `-p` 로 직접):
 ```bash
-ssh -F /dev/null -p <배정포트> -i ~/.ssh/id_ed25519 <본인계정>@10.128.30.42
+ssh -F /dev/null -p <배정포트> -i ~/.ssh/id_ed25519 <본인계정>@<DEV_SERVER_IP>
 ```
 - **이게 되면** → 서버·계정·키는 정상. 범인은 100% 로컬 `~/.ssh/config` 별칭.
   §1 표준 블록으로 `Host gpu42` 를 다시 만들고 `ssh gpu42` 로 재시도.

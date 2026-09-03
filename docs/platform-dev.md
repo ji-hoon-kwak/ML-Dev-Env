@@ -7,6 +7,8 @@
 > ML 은 GPU 때문에 컨테이너가 필수지만, PF 는 로컬이 Conductor 등 생산성 도구를
 > 그대로 쓸 수 있어 우선이다.
 
+> 📍 `<DEV_SERVER_IP>` = 42 dev 서버 IP (사설망 · admin 안내). 아래 예시의 이 자리에 실제 값을 넣는다.
+
 ## AI(ML) vs 플랫폼(PF) — 근본 차이
 
 | | AI(ML) 개발자 | 플랫폼(PF) 개발자 |
@@ -41,7 +43,7 @@ AI 서비스를 부른다(원칙 3, Pluggable Models 경계 바깥). **GPU는 AI
 **1) `~/.ssh/config` 의 gpu42 블록에 터널 추가:**
 ```
 Host gpu42
-    HostName 10.128.30.42
+    HostName <DEV_SERVER_IP>
     User <본인계정>
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
@@ -112,13 +114,13 @@ cd ui/apps/scope && npm install && npm run dev -- --port 3405
 **네트워크 미연결(호스트 IP+공개포트) 폴백**:
 | 대상 | URL |
 |---|---|
-| Postgres | `10.128.30.42:3120` |
-| Redis | `10.128.30.42:3130` |
-| Elasticsearch | `10.128.30.42:3140` |
-| Milvus | `10.128.30.42:3110` |
-| ssave-scene | `http://10.128.30.42:3101` |
-| ssave-fg | `http://10.128.30.42:3102` |
-| trace-api | `http://10.128.30.42:3001` |
+| Postgres | `<DEV_SERVER_IP>:3120` |
+| Redis | `<DEV_SERVER_IP>:3130` |
+| Elasticsearch | `<DEV_SERVER_IP>:3140` |
+| Milvus | `<DEV_SERVER_IP>:3110` |
+| ssave-scene | `http://<DEV_SERVER_IP>:3101` |
+| ssave-fg | `http://<DEV_SERVER_IP>:3102` |
+| trace-api | `http://<DEV_SERVER_IP>:3001` |
 
 ⚠️ **`INTERNAL_SERVICE_SECRET`** + `SSAVE_SCENE_URL`·`SSAVE_FG_URL`·`TRACE_API_URL` 은
 배포 `.env.dev` 값을 재사용해야 gateway→scene/fg/trace 호출이 통과한다(fail-closed).
