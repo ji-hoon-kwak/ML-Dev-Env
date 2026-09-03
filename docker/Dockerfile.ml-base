@@ -15,10 +15,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 # libgl1/libglib2.0-0: opencv-python 이 headless 서버에서 import 되려면 필요
 # openssh-server: ⭐ 개발자가 '호스트가 아니라 이 컨테이너'로 직접 SSH 접속(격리 접속 모델).
 # redis-server / postgresql: 개인 테스트 저장소를 컨테이너 안 로컬 프로세스로(devstores).
+# node/npm: ⭐ conda 가 아니라 시스템(/usr/bin, NodeSource)에 설치 → conda env 활성화와
+#   무관하게 기본 PATH 에서 node/npm/corepack(pnpm) 사용 가능. (pf-base 와 동일 방식)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        sudo git wget curl ca-certificates openssh-client openssh-server \
+        sudo git wget curl ca-certificates gnupg openssh-client openssh-server \
         redis-server postgresql postgresql-contrib \
         libgl1 libglib2.0-0 tmux htop vim \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
     && rm -rf /var/lib/apt/lists/*
 
 # --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---

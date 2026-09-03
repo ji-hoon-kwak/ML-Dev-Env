@@ -3,8 +3,10 @@ name: dev
 channels:
   - conda-forge
 dependencies:
+  # node/npm 은 conda 가 아니라 시스템(/usr/bin)에 설치한다(Dockerfile.ml-base NodeSource)
+  # — conda env 활성화와 무관하게 기본 PATH 에서 잡히도록. (conda 안에 두면 dev env
+  #   활성 때만 잡혀 팀원이 "node 없음"을 겪는다.)
   - python=3.12
-  - nodejs           # node + npm (FE/JS 툴링 · corepack 로 pnpm)
   - numpy
   - pandas
   - pip
