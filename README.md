@@ -127,6 +127,27 @@ sudo ./scripts/provision_ml.sh <user> keys/<user>.pub 0
 - 개발자는 자기 컨테이너 안에서 `pip install`·`conda install` 가능(conda 트리가
   mlteam group-writable). copy-on-write 라 다른 개발자 컨테이너엔 영향 없다.
 
+### sshd 호스트 키는 이미지가 아니라 호스트에 영속화한다
+
+컨테이너 sshd 호스트 키(그 엔드포인트의 **신원**)는 이미지에 굽지 않는다. 예전엔 base 이미지가
+`ssh-keygen -A` 로 키를 구웠는데, 이러면 **재빌드/prune 마다 새 랜덤 키**가 나와 그 컨테이너에
+붙던 개발자 전원이 `REMOTE HOST IDENTIFICATION HAS CHANGED` 를 겪고 각자 `known_hosts` 를
+지워야 했다. 지금은 `provision_*.sh` 가 개발자별 키를 `/data/42dev/hostkeys/<컨테이너>/` 에
+**최초 1회** 발급해 `/etc/ssh/keys` 로 read-only 마운트한다 → **재빌드·재발급해도 키 불변**.
+
+- **정상 상태에선 호스트 키 에러가 안 난다.** 홈 데이터가 볼륨이라 보존되는 것과 같은 원리로
+  신원(키)도 보존된다. 발급 출력의 지문을 개발자에게 넘겨 첫 접속 때 대조시키면 된다.
+- ⭐ **옛 baked-key 컨테이너 → 새 방식 이행은 `migrate_hostkeys.sh` 로 무중단(zero-touch)**.
+  재-provision 전에 그 컨테이너가 **지금 쓰는 키를 그대로 영속 저장소로 수확**하므로, 재발급
+  후에도 같은 키 → 개발자는 `known_hosts` 를 만질 필요가 없다. 안 그러면(그냥 재-provision)
+  provision 이 새 키를 만들어 그 개발자만 1회 재신뢰가 필요해진다.
+  ```bash
+  # 이행할 컨테이너별로: 수확 → 제거 → 재발급 (수확이 재발급의 [keep] 경로를 태운다)
+  sudo ./scripts/migrate_hostkeys.sh                     # 대상 전체(pf-*/ml-*) 키 수확, idempotent
+  docker rm -f ml-<user> && sudo ./scripts/provision_ml.sh <user> keys/<user>.pub <gpu>
+  ```
+  이미 새 방식으로 발급된 컨테이너(영속 키 존재)는 자동으로 건너뛴다.
+
 ## 서비스 스택 공존 (42 = dev 배포 서버 겸용)
 
 같은 호스트에 PIA Scope dev 스택(`piascope-*` 12개 컨테이너: gateway 3100 ·
