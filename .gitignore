@@ -1,0 +1,23 @@
+# 절대 커밋 금지 — 퍼블릭 리포
+keys/                 # 개발자 SSH 공개키(개인 식별 · 발급용, 서버 로컬 데이터)
+*.pub
+.env
+.env.*
+!.env.example
+secrets*
+*.secret
+*.key
+*.pem
+id_ed25519*
+id_rsa*
+
+# 옛 이름/생성물 (rename 전 잔재가 다시 안 들어오게)
+docker/Dockerfile.base
+docker/Dockerfile
+docker/environment.yml
+docker/pyproject.toml
+
+# OS/파이썬 잡동사니
+.DS_Store
+__pycache__/
+*.pyc

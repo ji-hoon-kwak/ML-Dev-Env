@@ -45,21 +45,21 @@ cat ~/.ssh/id_ed25519.pub        # macOS/Linux
 
 ## 2단계 — 신청서 제출
 
-아래 양식을 채워 **admin(@jhkwak)** 에게 DM 또는 `#piaspace-dev` 로 보낸다.
+아래 양식을 채워 **admin** 에게 DM 또는 `#piaspace-dev` 로 보낸다.
 
 ```
 [42 서버 개발환경 신청]
 - 이름:                        (예: 김동현)
-- 희망 계정명:                 (예: dhkim  — 아래 규칙 참조)
-- 이메일:                      (예: dh.kim@pia.space)
-- SSH 공개키(.pub 한 줄):      ssh-ed25519 AAAAC3Nza... dh.kim@pia.space
+- 희망 계정명:                 (예: user1  — 아래 규칙 참조)
+- 이메일:                      (예: user1@example.com)
+- SSH 공개키(.pub 한 줄):      ssh-ed25519 AAAAC3Nza... user1@example.com
 - 주 사용 목적:                (예: SSAVE 검색 모델 학습 / TRACE 추적 개발 / 기타)
 - GPU 필요 수준:               (일상 개발만 / 주기적 학습 있음)
 ```
 
 **희망 계정명 규칙:**
 - 영문 소문자·숫자만, 공백/특수문자 없이.
-- 사내 관례 = **이름 이니셜 + 성** (예: 김동현 → `dhkim`, 곽지훈 → `jhkwak`).
+- 사내 관례 = **이름 이니셜 + 성** (예: 홍길동 → `gdhong`).
 - 이미 쓰는 계정명과 겹치면 admin 이 대안을 제안한다.
 
 ---

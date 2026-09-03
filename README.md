@@ -62,17 +62,17 @@ torch/CUDA/GPU 가 필수다. 플랫폼(gateway/FE)은 모델을 안 돌리고 *
 
 ```bash
 # AI(ML) 개발자 — GPU 컨테이너 ml-<user>
-sudo ./scripts/provision_ml.sh dhkim keys/dhkim.pub        # GPU 전체 공유 (기본)
+sudo ./scripts/provision_ml.sh user1 keys/user1.pub        # GPU 전체 공유 (기본)
 sudo ./scripts/provision_ml.sh mkim  keys/mkim.pub  2,3    # 특정 GPU 만
 
 # 플랫폼(BE/FE) 개발자 — GPU 없는 컨테이너 pf-<user> (+ 서비스 네트워크 연결)
-sudo ./scripts/provision_pf.sh jihoon keys/jihoon.pub
+sudo ./scripts/provision_pf.sh user7 keys/user7.pub
 ```
 
 개발자 접속 동선 — ⭐ 호스트가 아니라 '컨테이너 sshd'로 직접 (격리 접속 모델):
 
 ```
-ssh -p <ssh포트> dhkim@<42서버>   →  바로 컨테이너 안 셸 (conda dev env 자동)
+ssh -p <ssh포트> user1@<42서버>   →  바로 컨테이너 안 셸 (conda dev env 자동)
 VS Code: Remote-SSH 로 <42서버>:<ssh포트> 를 '원격 호스트'로 추가해 접속
 ```
 발급 시 배정된 `<ssh포트>`(2200~2299)는 provision 출력·GPU/포트 대장에서 확인.
@@ -193,9 +193,9 @@ mlteam 을 기본으로 두면 **admin 없이도 팀원끼리 워크스페이스
 **기존 계정 정렬**: 스크립트를 다시 돌리면 기존 계정의 primary group 도 mlteam 으로
 맞춰지지만, **이미 만들어둔 파일의 그룹은 그대로**다. 필요하면 한 번 마이그레이션:
 ```bash
-sudo find /home/dhkim -not -group mlteam -exec chgrp mlteam {} +   # dhkim 예시
-# dhkim 은 GPU/그룹 정렬을 위해 컨테이너 재발급 권장:
-sudo docker rm -f ml-dhkim && sudo ./scripts/provision_ml.sh dhkim keys/dhkim.pub 0
+sudo find /home/user1 -not -group mlteam -exec chgrp mlteam {} +   # user1 예시
+# user1 은 GPU/그룹 정렬을 위해 컨테이너 재발급 권장:
+sudo docker rm -f ml-user1 && sudo ./scripts/provision_ml.sh user1 keys/user1.pub 0
 ```
 공유 write 를 자주 한다면(같은 파일을 여러 명이 수정) 개발자 셸 `umask 002` 를 권장
 (기본 022 는 그룹에 read 만 준다). 서로 다른 파일을 만드는 일반적 경우엔 불필요.

@@ -60,7 +60,7 @@ docker run --rm --gpus '"device=2,3"' \
 nvidia-smi -L                                    # 물리 GPU 목록
 nvidia-smi                                       # 현재 어느 GPU 를 누가 점유 중인가
 # 컨테이너별 GPU 할당 확인:
-docker inspect ml-dhkim --format \
+docker inspect ml-user1 --format \
   '{{range .HostConfig.DeviceRequests}}gpu={{.DeviceIDs}}{{end}}'
 ```
 

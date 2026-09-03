@@ -1,7 +1,7 @@
 # Suprema 얼굴 SDK — dev 환경 공유 (조사 기록 + 현재 결론)
 
 > 대상: 42 서버 dev 컨테이너들이 Suprema 얼굴 인식을 **동일하게** 쓰게 만드는 방법.
-> 최초 2026-08-19 (jh.kwak). ⚠️ **2026-08-20 대폭 개정** — 초기 전제("모든 컨테이너에
+> 최초 2026-08-19 (admin). ⚠️ **2026-08-20 대폭 개정** — 초기 전제("모든 컨테이너에
 > data.conf 마운트")가 SDK 설계와 어긋남을 확인, 방향을 **HTTP 엔드포인트 공유**로 정정.
 > 근거 = 레포 `TRACE_SSAVE-AI-MVP` 의 `scripts/face/qfe_http_server/README.md` ·
 > `infra/configs/identity.yaml` · `piapf/face/suprema_adapter.py` · ADR-023.
@@ -12,7 +12,7 @@
 
 - **Suprema QFaceEngine 은 노드락된 in-process C++ 라이브러리로, 라이선스된 머신에서만 돈다.**
   임의 컨테이너/호스트에서 초기화 불가. → **컨테이너 안에서 InitSDK 직접 호출은 노드락으로 실패한다**
-  (minkyung 이 본 `InitSDK -5` = 라이선스 계열 에러의 정체).
+  (user2 이 본 `InitSDK -5` = 라이선스 계열 에러의 정체).
 - 설계상 SDK 는 **라이선스 호스트에서 `qfe_http_server` 프로세스 하나**로 뜨고(loopback
   127.0.0.1:18080), **나머지 전부는 HTTP 클라이언트**다. TRACE identity·SSAVE 얼굴 필터는
   SDK 를 직접 안 돌리고 **`SUPREMA_ENDPOINT` 환경변수만** 본다(`identity.yaml`).
@@ -29,25 +29,25 @@
 
 | 위치 | 소유/권한 | 크기 | md5 | 정체 |
 |---|---|---|---|---|
-| (옛) `/data/libs/qfe_home/data.conf` 초기 | — | 4360B | `3f38dc13` | minkyung `qfe_setup --check` 가 만든 **빈 스켈레톤**(활성화 없음) |
-| `/data/libs/qfe_home/data.conf` 현재 | `root:mlteam` 0640 | 15240B | `6a6e4f92` | gpuadmin 활성화본이 여기 복사됨(공유 원본 후보) |
-| gpuadmin 홈 `~/.local/.../data.conf` | uid1000:mlteam rw | 15240B | `6a6e4f92` | gpuadmin 활성화본(원본) |
-| minkyung 컨테이너 `~/.local/.../data.conf` | minkyung:mlteam rw | 15240B | `4f82a316` | **minkyung 의 별개 활성화본**(gpuadmin 것과 내용 다름) |
-| dev-jihoon 마운트 | `docker inspect` → `/home/gpuadmin/.local/.../data.conf → :ro` | | | **구버전 스크립트**로 만든 컨테이너(소스가 gpuadmin 홈, `/data/libs` 아님) |
+| (옛) `/data/libs/qfe_home/data.conf` 초기 | — | 4360B | `3f38dc13` | user2 `qfe_setup --check` 가 만든 **빈 스켈레톤**(활성화 없음) |
+| `/data/libs/qfe_home/data.conf` 현재 | `root:mlteam` 0640 | 15240B | `6a6e4f92` | admin 활성화본이 여기 복사됨(공유 원본 후보) |
+| admin 홈 `~/.local/.../data.conf` | uid1000:mlteam rw | 15240B | `6a6e4f92` | admin 활성화본(원본) |
+| user2 컨테이너 `~/.local/.../data.conf` | user2:mlteam rw | 15240B | `4f82a316` | **user2 의 별개 활성화본**(admin 것과 내용 다름) |
+| dev-user7 마운트 | `docker inspect` → `/home/admin/.local/.../data.conf → :ro` | | | **구버전 스크립트**로 만든 컨테이너(소스가 admin 홈, `/data/libs` 아님) |
 
 **해석**:
-- 활성화본이 **최소 2개**(gpuadmin `6a6e4f92`, minkyung `4f82a316`) — 내용이 서로 다름 →
+- 활성화본이 **최소 2개**(admin `6a6e4f92`, user2 `4f82a316`) — 내용이 서로 다름 →
   Suprema 활성화가 **인스턴스/시트마다 고유**함을 시사. "복사 한 방으로 전원 공유"가 안 되는 이유.
-- 컨테이너 SDK 경로는 **심볼릭 링크가 아니라 실제 파일**(minkyung 은 자기 활성화본, jihoon 은 구
+- 컨테이너 SDK 경로는 **심볼릭 링크가 아니라 실제 파일**(user2 은 자기 활성화본, user7 은 구
   스크립트의 :ro 마운트). 초반 "symlink" 는 이후 실파일로 바뀐 상태.
-- **마운트 배관 자체는 정상 작동**함을 dev-jihoon 에서 확인(`docker inspect` 로 `:ro` 확인). 문제는
+- **마운트 배관 자체는 정상 작동**함을 dev-user7 에서 확인(`docker inspect` 로 `:ro` 확인). 문제는
   배관이 아니라 "무엇을/어디서 초기화하느냐".
 
 ---
 
 ## 2. 왜 "자기 홈 심볼릭 링크"도 "컨테이너별 data.conf 마운트"도 정답이 아닌가
 
-- **홈 symlink**: 각 컨테이너는 그 유저 홈만 bind 하므로, minkyung 홈의 링크는 minkyung 컨테이너
+- **홈 symlink**: 각 컨테이너는 그 유저 홈만 bind 하므로, user2 홈의 링크는 user2 컨테이너
   에서만 보인다 → 사람마다 수동, 확장 불가.
 - **data.conf 마운트(초기 접근)**: 배관은 되지만 **노드락**이 막는다. 컨테이너는 라이선스 머신
   정체성이 아니라, 진짜 활성화 내용을 넣어도 in-container InitSDK 가 `-5` 로 거부될 수 있다.
@@ -58,7 +58,7 @@
 ## 3. 올바른 아키텍처 (레포 설계 = ADR-023)
 
 ```
-[라이선스 호스트 = 42, gpuadmin 활성화]
+[라이선스 호스트 = 42, admin 활성화]
    qfe_http_server  (C 프로그램, scripts/face/qfe_http_server/qfe_http_server.c)
      · source /data/libs/qfe_license/env.sh   ← 런타임 라이선스 로딩(진짜 활성화 지점)
      · QFE_ROOT=/data/libs/QFE_v1.1.3          ← SDK/모델/헤더/라이선스 설치처(레포 밖)
@@ -81,7 +81,7 @@
 
 ## 4. 남은 미검증 / 결정 사항
 
-1. **42 가 라이선스 호스트가 맞는지** — gpuadmin 활성화가 42 에 있으니 유력하나 확인 필요.
+1. **42 가 라이선스 호스트가 맞는지** — admin 활성화가 42 에 있으니 유력하나 확인 필요.
 2. **`/data/libs/qfe_license/env.sh` · `/data/libs/QFE_v1.1.3` 존재 여부**, 이미 18080 에 서버가
    떠 있는지.
 3. ⚠️ **네트워크 토폴로지 결정 (보안 — TICKET-OPS-012)**: 서버는 일부러 **loopback 전용**이다
@@ -116,14 +116,14 @@ curl -s 127.0.0.1:18080/health
   필요하나, 이는 **라이선스 호스트에서** 하는 작업이고 4-인스턴스 한도를 공유한다 — 컨테이너 대량
   배포 대상이 아니다.
 
-> ⏳ 급한 개발 단계라 지금은 minkyung 개인 활성화로 굴러가는 상태를 유지. 위 §4 검증이 끝나면
+> ⏳ 급한 개발 단계라 지금은 user2 개인 활성화로 굴러가는 상태를 유지. 위 §4 검증이 끝나면
 > §5 개정과 함께 이 문서의 "현재 결론"을 확정한다.
 
 ---
 
 ## 6. ⭐ 우리 선에서 진행하는 실행 계획 (담당자 부재 · 정보만으로 가능)
 
-전제: 42 가 라이선스 호스트(gpuadmin 활성화가 여기 있음). **유일한 미검증 가정 = "42 bare-metal
+전제: 42 가 라이선스 호스트(admin 활성화가 여기 있음). **유일한 미검증 가정 = "42 bare-metal
 에서 라이선스가 검증되는가"인데, 이는 아래 Phase 1 로 비파괴적으로 즉시 확인된다**(실패해도 아무것도
 안 바뀜). 그래서 담당자 없이도 안전하게 진행 가능.
 
@@ -137,7 +137,7 @@ curl -s 127.0.0.1:18080/health
 # 셋 다 존재하면 Phase 1 진행 가능. 하나라도 없으면 그게 첫 blocker(담당자/설치 필요).
 ls -la /data/libs/qfe_license/env.sh /data/libs/QFE_v1.1.3 /data/libs/facedb/face_database.db 2>&1
 
-# bare-metal(gpuadmin)에서 wrapper 기동 — 기본 loopback:18080
+# bare-metal(admin)에서 wrapper 기동 — 기본 loopback:18080
 cd <repo>/scripts/face/qfe_http_server && ./build.sh     # QFE_ROOT=/data/libs/QFE_v1.1.3 기본
 source /data/libs/qfe_license/env.sh                     # ← 런타임 라이선스 로딩(필수)
 ./qfe_http_server --db /data/libs/facedb/face_database.db &
@@ -218,7 +218,7 @@ docker exec piascope-trace-worker sh -lc 'echo $SUPREMA_ENDPOINT; curl -s $SUPRE
 
 ### Phase 4 — 상시 기동 (systemd, 재부팅 생존)
 
-`/etc/systemd/system/qfe-http.service` (gpuadmin 소유 라이선스로 실행):
+`/etc/systemd/system/qfe-http.service` (admin 소유 라이선스로 실행):
 
 ```ini
 [Unit]
@@ -226,7 +226,7 @@ Description=Suprema QFE HTTP wrapper (node-locked, licensed host only)
 After=network-online.target docker.service
 
 [Service]
-User=gpuadmin
+User=admin
 # env.sh 를 소싱한 셸로 실행 (라이선스 런타임 로딩)
 ExecStart=/bin/bash -lc 'source /data/libs/qfe_license/env.sh && exec /data/libs/qfe_http_server/qfe_http_server --bind 172.17.0.1 --db /data/libs/facedb/face_database.db'
 Restart=on-failure
@@ -245,7 +245,7 @@ curl -s 172.17.0.1:18080/health
 
 ### 이 계획으로 두 조건 충족
 
-- **minkyung 개발**: 자기 컨테이너 `SUPREMA_ENDPOINT` 를 이 공유 wrapper 로 돌리면 개인 활성화·시트
+- **user2 개발**: 자기 컨테이너 `SUPREMA_ENDPOINT` 를 이 공유 wrapper 로 돌리면 개인 활성화·시트
   소모 없이 동일하게 사용(선택). 기존 개인 활성화 유지도 무방하나 시트 하나를 점유함.
 - **시연(42)**: trace-worker 가 같은 wrapper 를 봄 → 시연 서버에서 Suprema 사용 가능. **4-인스턴스
   한도를 한 wrapper 가 관리** → 시트 경합 없음.
@@ -262,7 +262,7 @@ curl -s 172.17.0.1:18080/health
 **최종 구성**
 - **wrapper**: `qfe_http_server`(빌드본을 `/data/libs/qfe_http_server/qfe_http_server`로 배치),
   **systemd `qfe-http.service`**로 상시 기동(`enabled` = 재부팅 생존), **`--bind 0.0.0.0`**,
-  `--db /data/libs/facedb/face_database.db`, `enroll=off`, 4 instance, `User=gpuadmin`.
+  `--db /data/libs/facedb/face_database.db`, `enroll=off`, 4 instance, `User=admin`.
   라이선스 로딩은 유닛 ExecStart의 `source /data/libs/qfe_license/env.sh`.
 - **trace-worker**(compose): `SUPREMA_ENDPOINT=http://host.docker.internal:18080` +
   `extra_hosts: host.docker.internal:host-gateway`. 값은 `.env`(통합됨, `.env.dev` 아님)에서 주입.

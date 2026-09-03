@@ -19,7 +19,7 @@
 ```
 Host gpu42
     HostName <DEV_SERVER_IP>
-    User <본인계정>            # 예: dhkim  (반드시 본인 계정)
+    User <본인계정>            # 예: user1  (반드시 본인 계정)
     Port <배정포트>            # ⭐ 발급 시 받은 컨테이너 sshd 포트 (예: 2205)
     IdentityFile ~/.ssh/id_ed25519
 ```
@@ -122,7 +122,7 @@ ssh -F /dev/null -p <배정포트> -i ~/.ssh/id_ed25519 <본인계정>@<DEV_SERV
 ### 그 외
 
 - 컨테이너가 죽어 있음(= `ssh gpu42` 자체가 안 됨): 컨테이너는 `--restart unless-stopped`
-  로 자동 재시작된다. 그래도 안 뜨면 admin(@jhkwak)에게 요청(개발자는 호스트 docker 권한 없음).
+  로 자동 재시작된다. 그래도 안 뜨면 admin에게 요청(개발자는 호스트 docker 권한 없음).
 - 첫 Remote-SSH 접속이 오래 걸림: VS Code 확장(Python·Jupyter) 최초 설치 중 —
   멈춘 게 아니니 기다린다. 두 번째부터는 즉시 붙는다.
-- 그 외: admin(@jhkwak) 에게. 컨테이너 재발급은 홈 데이터를 건드리지 않는다.
+- 그 외: admin 에게. 컨테이너 재발급은 홈 데이터를 건드리지 않는다.

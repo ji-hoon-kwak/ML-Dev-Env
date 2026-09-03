@@ -4,8 +4,8 @@
 #
 # 사용법 (42 서버에서 admin/sudo 로 실행):
 #   sudo ./provision_ml.sh <username> <pubkey-file> [gpu-devices]
-#   예: sudo ./provision_ml.sh dhkim keys/dhkim.pub          # GPU 전체 공유 (기본)
-#       sudo ./provision_ml.sh dhkim keys/dhkim.pub 2,3      # 특정 GPU 만
+#   예: sudo ./provision_ml.sh user1 keys/user1.pub          # GPU 전체 공유 (기본)
+#       sudo ./provision_ml.sh user1 keys/user1.pub 2,3      # 특정 GPU 만
 #   옵션(env): SSH_PORT=2205 (컨테이너 sshd 호스트 포트 고정 · 생략 시 2200~2299 자동)
 #             EGRESS_NETWORK=<net> (읽기전용 공유 의존이 필요할 때만 명시 연결 · 기본 없음)
 #
@@ -23,7 +23,7 @@ set -euo pipefail
 BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
 WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
-FACE_LICENSE_SRC="/data/libs/qfe_home/data.conf"                     # Suprema 활성화 단일 원본(mlteam 공유). gpuadmin 이 share_license.sh export 로 여기에 심는다. gpuadmin 홈(0750)에 직접 물리면 권한·재활성화에 취약하므로 공유 경로를 단일 원천으로 둔다.
+FACE_LICENSE_SRC="/data/libs/qfe_home/data.conf"                     # Suprema 활성화 단일 원본(mlteam 공유). admin 이 share_license.sh export 로 여기에 심는다. admin 홈(0750)에 직접 물리면 권한·재활성화에 취약하므로 공유 경로를 단일 원천으로 둔다.
 FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이너 $HOME 기준 — SDK가 읽는 위치
 # ⭐ 얼굴 SDK 소비자(trace-worker·dev 파이프라인)는 라이선스 파일이 아니라 QFE HTTP wrapper URL 만
 #    필요하다 (ADR-023 · identity.yaml: endpoint=${SUPREMA_ENDPOINT}). QFE 는 노드락이라 컨테이너 안
@@ -211,7 +211,7 @@ else
     # ---- Suprema 얼굴 SDK 라이선스: 활성화 원본을 컨테이너 $HOME 경로에 read-only 마운트 ----
     # SDK 는 실행 사용자의 $HOME/.local/share/data/bconf/data.conf 를 읽는다. 컨테이너 홈은
     # 호스트 홈 bind 이므로, 그 아래에 nested single-file bind 로 활성화 원본을 얹는다.
-    # (모든 dev 가 gpuadmin 의 단일 원본을 :ro 로 공유 — 복사 없음.) target 부모 dir 을
+    # (모든 dev 가 admin 의 단일 원본을 :ro 로 공유 — 복사 없음.) target 부모 dir 을
     # 호스트 홈에 먼저 만들어 둔다(없으면 nested 마운트 실패).
     install -d -o "$USERNAME" -g "$MLTEAM_GROUP" "$HOME_DIR/$(dirname "$FACE_LICENSE_REL")"
     FACE_LICENSE_MOUNT=()
