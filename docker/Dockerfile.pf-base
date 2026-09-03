@@ -25,18 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && corepack enable \
     && rm -rf /var/lib/apt/lists/*
 
-# --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---
-# ⭐ 호스트 키는 이미지에 굽지 않는다(예전 `ssh-keygen -A`). 이미지 레이어에 키가 살면
-#    이미지 수명 = 키 수명이라, 재빌드/prune 마다 새 랜덤 키가 나와 클라이언트
-#    known_hosts 를 깨뜨린다(REMOTE HOST IDENTIFICATION HAS CHANGED). 대신 provision_*.sh
-#    이 개발자별 호스트 키를 '최초 1회' 발급해 /etc/ssh/keys 로 read-only 마운트한다 →
-#    재빌드·재발급에도 호스트 키(신원)가 불변. sshd_config 의 HostKey 가 그 경로를 가리킨다.
-#    (마운트 없이 이 이미지만 실행하면 sshd 는 키가 없어 기동 실패 = 의도된 loud fail.)
-COPY sshd_config_42dev.conf /etc/ssh/sshd_config.d/42dev.conf
-COPY devstores.sh /usr/local/bin/devstores
-RUN mkdir -p /run/sshd /etc/ssh/keys \
-    && chmod 0755 /usr/local/bin/devstores
-
 # --- mlteam 그룹 + 공용 venv(group-writable) ---
 # venv 를 /opt/venv(홈 밖)에 두는 이유: 홈은 호스트 볼륨으로 덮이므로 홈 안에 만들면
 # 이미지에 구운 환경이 마운트에 가려진다. group-writable → 개발자가 자기 컨테이너
@@ -58,6 +46,21 @@ ENV PATH=/opt/venv/bin:$PATH
 #    Python 확장 호스트(비대화형)가 venv python 을 자동 탐지하려면 PAM(pam_env)이
 #    읽는 /etc/environment 에 PATH 를 박아야 한다. (안 그러면 "Python 없음" 팝업)
 RUN printf 'PATH=/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n' > /etc/environment
+
+# --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---
+# ⭐ 이 블록을 무거운 venv/pip 레이어 '뒤'에 둔다. 레이어 캐시는 위→아래로만 유효하므로,
+#    자주 바뀌는 sshd 설정·키 정책을 앞에 두면 그 변경이 밑의 pip 레이어 캐시까지
+#    무효화해 매번 재설치가 돈다. 뒤로 빼면 sshd 만 다시 굽고 pip 캐시는 보존된다.
+# ⭐ 호스트 키는 이미지에 굽지 않는다(예전 `ssh-keygen -A`). 이미지 레이어에 키가 살면
+#    이미지 수명 = 키 수명이라, 재빌드/prune 마다 새 랜덤 키가 나와 클라이언트
+#    known_hosts 를 깨뜨린다(REMOTE HOST IDENTIFICATION HAS CHANGED). 대신 provision_*.sh
+#    이 개발자별 호스트 키를 '최초 1회' 발급해 /etc/ssh/keys 로 read-only 마운트한다 →
+#    재빌드·재발급에도 호스트 키(신원)가 불변. sshd_config 의 HostKey 가 그 경로를 가리킨다.
+#    (마운트 없이 이 이미지만 실행하면 sshd 는 키가 없어 기동 실패 = 의도된 loud fail.)
+COPY sshd_config_42dev.conf /etc/ssh/sshd_config.d/42dev.conf
+COPY devstores.sh /usr/local/bin/devstores
+RUN mkdir -p /run/sshd /etc/ssh/keys \
+    && chmod 0755 /usr/local/bin/devstores
 
 # pid1 = sshd(포그라운드). 개발자는 컨테이너 sshd 로 직접 들어와 작업한다.
 CMD ["/usr/sbin/sshd", "-D", "-e"]
