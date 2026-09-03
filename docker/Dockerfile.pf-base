@@ -49,5 +49,10 @@ RUN groupadd -g "${MLTEAM_GID}" mlteam \
 # venv 를 PATH 기본값으로 — 셸에 python/uvicorn 즉시 노출.
 ENV PATH=/opt/venv/bin:$PATH
 
+# ⭐ /etc/environment — 컨테이너 sshd 세션은 이미지 ENV 를 안 물려받는다. VS Code
+#    Python 확장 호스트(비대화형)가 venv python 을 자동 탐지하려면 PAM(pam_env)이
+#    읽는 /etc/environment 에 PATH 를 박아야 한다. (안 그러면 "Python 없음" 팝업)
+RUN printf 'PATH=/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n' > /etc/environment
+
 # pid1 = sshd(포그라운드). 개발자는 컨테이너 sshd 로 직접 들어와 작업한다.
 CMD ["/usr/sbin/sshd", "-D", "-e"]

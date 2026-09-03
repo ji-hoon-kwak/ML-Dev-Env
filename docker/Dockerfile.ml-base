@@ -53,6 +53,12 @@ RUN groupadd -g "${MLTEAM_GID}" mlteam \
 # 활성화는 (a) 아래 PATH 기본값 + (b) provision_ml.sh 의 호스트 ~/.bashrc snippet.
 ENV PATH=/opt/conda/envs/dev/bin:/opt/conda/bin:$PATH
 
+# ⭐ /etc/environment — 컨테이너 sshd 세션은 이미지 ENV 를 안 물려받고, ~/.bashrc
+#    conda 스니펫은 '대화형' 셸만 커버한다. VS Code Python 확장 호스트(비대화형)가
+#    conda python 을 자동 탐지하려면 PAM(pam_env)이 읽는 /etc/environment 에 PATH 를
+#    박아야 한다. (안 그러면 "Python 을 찾을 수 없습니다" → uv 설치 유도 팝업)
+RUN printf 'PATH=/opt/conda/envs/dev/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n' > /etc/environment
+
 # pid1 = sshd(포그라운드). 개발자는 컨테이너 sshd 로 직접 들어와 작업한다.
 # (예전 `sleep infinity` + 호스트 `docker exec` 모델은 호스트 docker 접근을 요구했다 →
 #  그게 오염 경로였다. 이제 호스트 docker 없이 접속 가능.)
