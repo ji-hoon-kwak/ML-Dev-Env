@@ -26,10 +26,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # --- sshd (컨테이너 직결 접속) + devstores (컨테이너 안 개인 저장소) ---
+# ⭐ 호스트 키는 이미지에 굽지 않는다(예전 `ssh-keygen -A`). 이미지 레이어에 키가 살면
+#    이미지 수명 = 키 수명이라, 재빌드/prune 마다 새 랜덤 키가 나와 클라이언트
+#    known_hosts 를 깨뜨린다(REMOTE HOST IDENTIFICATION HAS CHANGED). 대신 provision_*.sh
+#    이 개발자별 호스트 키를 '최초 1회' 발급해 /etc/ssh/keys 로 read-only 마운트한다 →
+#    재빌드·재발급에도 호스트 키(신원)가 불변. sshd_config 의 HostKey 가 그 경로를 가리킨다.
+#    (마운트 없이 이 이미지만 실행하면 sshd 는 키가 없어 기동 실패 = 의도된 loud fail.)
 COPY sshd_config_42dev.conf /etc/ssh/sshd_config.d/42dev.conf
 COPY devstores.sh /usr/local/bin/devstores
-RUN mkdir -p /run/sshd \
-    && ssh-keygen -A \
+RUN mkdir -p /run/sshd /etc/ssh/keys \
     && chmod 0755 /usr/local/bin/devstores
 
 # --- mlteam 그룹 + 공용 venv(group-writable) ---

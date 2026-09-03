@@ -35,6 +35,9 @@ FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이
 #    배경·실행순서 = docs/suprema-license-sharing.md §실행계획.
 SUPREMA_ENDPOINT_URL="${SUPREMA_ENDPOINT_URL:-http://host.docker.internal:18080}"
 LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · read-only 마운트, admin 관리)
+# ⭐ 컨테이너 sshd 호스트 키(신원)를 이미지 밖 호스트에 영속화 → 이미지 재빌드/컨테이너
+#    재발급에도 키 불변(클라이언트 known_hosts 안 깨짐). 컨테이너별 하위 디렉터리에 최초 1회 발급.
+HOSTKEYS_DIR="/data/42dev/hostkeys"
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID — 호스트·컨테이너·bind-mount 가 같은 번호를 공유
 # ⭐ 공유 네트워크엔 기본적으로 연결하지 않는다 (격리). 읽기전용 공유 의존(예: 공유
@@ -162,6 +165,7 @@ echo "[ok] 이미지 빌드: $IMAGE (FROM pia/ml-base)"
 
 # ---- 4. 컨테이너 실행 ----
 CONTAINER="ml-${USERNAME}"
+KEYDIR="$HOSTKEYS_DIR/$CONTAINER"   # 컨테이너 sshd 호스트 키(신원) 영속 저장 — 재빌드/재발급 불변
 if [[ "$GPU_DEVICES" == "all" ]]; then
     GPU_FLAG=(--gpus all)
 else
@@ -234,6 +238,22 @@ else
         echo "[info] SUPREMA_ENDPOINT_URL 미설정 — 엔드포인트 주입 생략(얼굴 identity off · 추적엔 무관)"
     fi
 
+    # ---- 컨테이너 sshd 호스트 키: 최초 1회 발급 후 영구 고정 ----
+    # 키를 이미지가 아니라 호스트($KEYDIR)에 두므로 이미지 재빌드·컨테이너 재발급에도
+    # 신원(호스트 키)이 그대로다. 예전 base 이미지의 `ssh-keygen -A` 는 재빌드마다 새 키를
+    # 굽어 클라이언트 known_hosts 를 깼다(REMOTE HOST IDENTIFICATION HAS CHANGED).
+    if [[ ! -f "$KEYDIR/ssh_host_ed25519_key" ]]; then
+        install -d -m 700 "$KEYDIR"
+        ssh-keygen -q -t ed25519 -f "$KEYDIR/ssh_host_ed25519_key" -N '' -C "$CONTAINER"
+        ssh-keygen -q -t rsa -b 4096 -f "$KEYDIR/ssh_host_rsa_key" -N '' -C "$CONTAINER"
+        ssh-keygen -q -t ecdsa -b 521 -f "$KEYDIR/ssh_host_ecdsa_key" -N '' -C "$CONTAINER"
+        chmod 600 "$KEYDIR"/ssh_host_*_key
+        chmod 644 "$KEYDIR"/ssh_host_*_key.pub
+        echo "[ok] 컨테이너 호스트 키 발급(최초 1회): $KEYDIR"
+    else
+        echo "[keep] 기존 호스트 키 재사용(불변): $KEYDIR"
+    fi
+
     docker run -d --name "$CONTAINER" \
         --restart unless-stopped \
         "${GPU_FLAG[@]}" \
@@ -243,6 +263,7 @@ else
         --label "role=ml" \
         --network "$DEVNET" \
         -p "${SSH_PORT}:22" \
+        -v "$KEYDIR":/etc/ssh/keys:ro \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
         -v "$LIBS_DIR":/libs:ro \
@@ -287,9 +308,14 @@ EOF
     echo "[ok] ~/.bashrc 에 conda 활성화 snippet 추가"
 fi
 
+HOSTKEY_FP="(발급 정보 없음)"
+[[ -f "$KEYDIR/ssh_host_ed25519_key.pub" ]] && HOSTKEY_FP="$(ssh-keygen -lf "$KEYDIR/ssh_host_ed25519_key.pub")"
+
 cat <<EOF
 
 === 발급 완료: $USERNAME ===
+호스트 키 지문 (개발자에게 전달 — 첫 접속 시 known_hosts 대조용, 재발급해도 불변):
+  ${HOSTKEY_FP}
 접속 안내 (개발자에게 전달) — ⭐ 호스트가 아니라 '컨테이너'로 직접 접속:
   ssh -p ${SSH_PORT} ${USERNAME}@<42서버주소>     # 바로 컨테이너 안 셸(conda dev)
   VS Code: Remote-SSH 로 <42서버주소>:${SSH_PORT} 를 '원격 호스트'로 추가해 접속

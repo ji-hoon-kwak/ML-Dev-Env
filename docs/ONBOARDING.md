@@ -119,6 +119,56 @@ ssh -F /dev/null -p <배정포트> -i ~/.ssh/id_ed25519 <본인계정>@<DEV_SERV
 - `user` 가 본인이 아님, `identityfile` 이 엉뚱함 → 위쪽 `Host *` 블록이 값을
   가로챈 것(먼저 매칭된 블록이 이김). 그 블록을 고치거나 gpu42 블록을 위로 옮긴다.
 
+### `REMOTE HOST IDENTIFICATION HAS CHANGED!` (호스트 키 변경)
+
+어제까지 되던 `ssh gpu42` 가 갑자기 아래처럼 뜨고 접속이 끊긴다:
+```
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+...
+Offending ECDSA key in /Users/<본인>/.ssh/known_hosts:42
+Host key verification failed.
+```
+
+**공격이 아니고, 서버가 키를 바꾼 것도 아니다 — 내 맥의 `known_hosts` 가 낡은 것이다.**
+
+컨테이너 sshd 호스트 키(그 엔드포인트의 **신원**)는 provision 이 개발자별로 **최초 1회**
+발급해 호스트(`/data/42dev/hostkeys/<컨테이너>/`)에 영속화하고, 컨테이너엔
+`/etc/ssh/keys` 로 read-only 마운트한다. 이미지엔 키를 굽지 않는다. 따라서 **이미지를
+재빌드하든 컨테이너를 몇 번을 재발급하든 호스트 키는 불변**이다 — 홈 데이터가 볼륨이라
+보존되는 것과 같은 원리.
+
+그럼 이 경고를 언제 보나? **경고는 서버 키가 아니라 내 맥이 예전에 캐시한 키를 기준으로**
+한다. 실무에서 뜨는 경우는 사실상 둘뿐이다:
+- **옛 방식(키를 이미지에 굽던 시절, `ssh-keygen -A`)으로 만든 컨테이너에 붙었던 이력이
+  있는 경우 — 마이그레이션성 1회성.** 그땐 재빌드마다 키가 갈려 이 경고가 났다. 아래처럼
+  옛 항목을 한 번 지우면 새 영속 키를 받고, **이후로는 재발급해도 다시 안 뜬다.**
+- 내 `known_hosts` 의 그 `[IP]:포트` 자리에 **예전 다른 컨테이너/서비스**의 키가 남아 있고
+  포트가 재사용된 경우. 역시 옛 줄을 지우면 끝.
+
+**서버는 멀쩡하다는 근거**: 컨테이너 로그가 `Server listening on 0.0.0.0 port 22` 뒤에
+`Connection closed by <client> [preauth]` 를 반복하면, 그건 sshd 가 죽은 게 아니라
+**클라이언트가 키 불일치를 보고 인증 전에 스스로 끊는** 정상 로그다.
+
+**해결 (내 맥에서만, 서버는 손대지 않음):** 옛 항목을 지우고 재접속한다.
+```bash
+# ⚠️ 비표준 포트는 known_hosts 에 [IP]:포트 형태로 저장된다 — 포트 없이 지우면 안 지워짐
+ssh-keygen -R "[<DEV_SERVER_IP>]:<배정포트>"
+ssh -p <배정포트> <본인계정>@<DEV_SERVER_IP>          # 새 지문 확인 후 yes
+```
+- `-R` 대상은 반드시 **에러가 알려준 그 줄**(`known_hosts:<번호>`)과 같은 키다.
+  못 맞추겠으면 그 줄을 에디터로 직접 지워도 된다.
+- **yes 하기 전에 지문 대조**(중간자 공격이 아님을 스스로 확인). admin 이 서버에서
+  현재 키의 지문을 읽어 알려줄 수 있다:
+  ```bash
+  # (admin, 호스트에서) 그 컨테이너의 실제 호스트 키 지문
+  docker exec <컨테이너> ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+  ```
+  이 값이 재접속 때 뜨는 fingerprint 와 같으면 안심하고 yes.
+- **VS Code Remote-SSH** 도 같은 증상("Host key verification failed")이며 해결도 동일 —
+  맥의 `known_hosts` 에서 그 줄을 지우고 다시 접속하면 새 키를 받는다.
+
 ### 그 외
 
 - 컨테이너가 죽어 있음(= `ssh gpu42` 자체가 안 됨): 컨테이너는 `--restart unless-stopped`

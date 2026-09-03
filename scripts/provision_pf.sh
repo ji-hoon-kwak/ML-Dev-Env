@@ -21,6 +21,9 @@ BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
 WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
 LIBS_DIR="/data/libs"                # 공유 라이브러리 (read-only 마운트)
+# ⭐ 컨테이너 sshd 호스트 키(신원)를 이미지 밖 호스트에 영속화 → 이미지 재빌드/컨테이너
+#    재발급에도 키 불변(클라이언트 known_hosts 안 깨짐). 컨테이너별 하위 디렉터리에 최초 1회 발급.
+HOSTKEYS_DIR="/data/42dev/hostkeys"
 MLTEAM_GROUP="mlteam"                # 개발자 공용 기본 그룹 (primary group)
 MLTEAM_GID="2000"                    # 고정 GID
 # 공유 네트워크 기본 미연결(격리). 공유 AI서비스(scene/fg/trace) HTTP 소비가 필요할 때만
@@ -117,6 +120,7 @@ echo "[ok] 이미지 빌드: $IMAGE (FROM pia/pf-base · GPU/torch 없음)"
 
 # ---- 4. 컨테이너 실행 (GPU 없음) ----
 CONTAINER="pf-${USERNAME}"
+KEYDIR="$HOSTKEYS_DIR/$CONTAINER"   # 컨테이너 sshd 호스트 키(신원) 영속 저장 — 재빌드/재발급 불변
 if docker inspect "$CONTAINER" &>/dev/null; then
     echo "[skip] 컨테이너 $CONTAINER 이미 존재 — 재발급하려면 먼저:" >&2
     echo "       docker rm -f $CONTAINER" >&2
@@ -148,6 +152,22 @@ else
     DATASET_MOUNT=()
     [[ -d "$DATASETS_DIR" ]] && DATASET_MOUNT=(-v "$DATASETS_DIR":/datasets:ro)
 
+    # ---- 컨테이너 sshd 호스트 키: 최초 1회 발급 후 영구 고정 ----
+    # 키를 이미지가 아니라 호스트($KEYDIR)에 두므로 이미지 재빌드·컨테이너 재발급에도
+    # 신원(호스트 키)이 그대로다. 예전 base 이미지의 `ssh-keygen -A` 는 재빌드마다 새 키를
+    # 굽어 클라이언트 known_hosts 를 깼다(REMOTE HOST IDENTIFICATION HAS CHANGED).
+    if [[ ! -f "$KEYDIR/ssh_host_ed25519_key" ]]; then
+        install -d -m 700 "$KEYDIR"
+        ssh-keygen -q -t ed25519 -f "$KEYDIR/ssh_host_ed25519_key" -N '' -C "$CONTAINER"
+        ssh-keygen -q -t rsa -b 4096 -f "$KEYDIR/ssh_host_rsa_key" -N '' -C "$CONTAINER"
+        ssh-keygen -q -t ecdsa -b 521 -f "$KEYDIR/ssh_host_ecdsa_key" -N '' -C "$CONTAINER"
+        chmod 600 "$KEYDIR"/ssh_host_*_key
+        chmod 644 "$KEYDIR"/ssh_host_*_key.pub
+        echo "[ok] 컨테이너 호스트 키 발급(최초 1회): $KEYDIR"
+    else
+        echo "[keep] 기존 호스트 키 재사용(불변): $KEYDIR"
+    fi
+
     docker run -d --name "$CONTAINER" \
         --restart unless-stopped \
         --cpus "$CPUS" --memory "$MEMORY" \
@@ -156,6 +176,7 @@ else
         --label "role=platform" \
         --network "$DEVNET" \
         -p "${SSH_PORT}:22" \
+        -v "$KEYDIR":/etc/ssh/keys:ro \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
         -v "$LIBS_DIR":/libs:ro \
@@ -198,9 +219,14 @@ EOF
     echo "[ok] ~/.bashrc 에 venv PATH snippet 추가"
 fi
 
+HOSTKEY_FP="(발급 정보 없음)"
+[[ -f "$KEYDIR/ssh_host_ed25519_key.pub" ]] && HOSTKEY_FP="$(ssh-keygen -lf "$KEYDIR/ssh_host_ed25519_key.pub")"
+
 cat <<EOF
 
 === 플랫폼 발급 완료: $USERNAME ===
+호스트 키 지문 (개발자에게 전달 — 첫 접속 시 known_hosts 대조용, 재발급해도 불변):
+  ${HOSTKEY_FP}
 접속 안내 (개발자에게 전달) — ⭐ 호스트가 아니라 '컨테이너'로 직접 접속:
   ssh -p ${SSH_PORT} ${USERNAME}@<42서버주소>     # 바로 컨테이너 안 셸(/opt/venv: python+node)
   VS Code: Remote-SSH 로 <42서버주소>:${SSH_PORT} 를 '원격 호스트'로 추가해 접속
