@@ -23,6 +23,11 @@ set -euo pipefail
 BASE_IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)"
 DATASETS_DIR="/data/datasets"        # 공유 데이터셋 (read-only 마운트)
 WEIGHTS_DIR="/data/weights"          # 공유 모델 weight (mlteam rw 공유)
+# ⭐ NAS(AI_data) — admin 이 42 '호스트'에서 NFS 마운트한 지점을 컨테이너에 read-only bind.
+#    dev 컨테이너는 devnet(172.31/16)이라 egress 방화벽으로 NAS(10.128.30.36)에 직접 못 닿고,
+#    비특권이라 컨테이너 안 NFS 마운트도 불가 → 호스트 마운트 + bind 가 유일한 정석(=/libs·/weights 패턴).
+#    호스트 준비: /etc/fstab 에 `10.128.30.36:/volume1/AI_data $NAS_DIR nfs vers=3,ro,_netdev,nofail 0 0`
+NAS_DIR="/data/nas/AI_data"          # 호스트 NFS 마운트 지점 (read-only 공유)
 FACE_LICENSE_SRC="/data/libs/qfe_home/data.conf"                     # Suprema 활성화 단일 원본(mlteam 공유). admin 이 share_license.sh export 로 여기에 심는다. admin 홈(0750)에 직접 물리면 권한·재활성화에 취약하므로 공유 경로를 단일 원천으로 둔다.
 FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이너 $HOME 기준 — SDK가 읽는 위치
 # ⭐ 얼굴 SDK 소비자(trace-worker·dev 파이프라인)는 라이선스 파일이 아니라 QFE HTTP wrapper URL 만
@@ -212,6 +217,15 @@ else
         echo "[warn] $DATASETS_DIR 없음 — 데이터셋 마운트 생략"
     fi
 
+    # ---- NAS(AI_data) read-only bind — 호스트가 실제로 NFS 마운트돼 있을 때만 ----
+    # mountpoint 검사로 'NAS 가 빠졌는데 빈 디렉터리를 붙이는' 사고를 막는다(빈 마운트 = 데이터 없음).
+    NAS_MOUNT=()
+    if mountpoint -q "$NAS_DIR"; then
+        NAS_MOUNT=(-v "$NAS_DIR":/mnt/nas192:ro)
+    else
+        echo "[warn] $NAS_DIR 가 마운트 안 됨 — NAS bind 생략 (호스트에서 먼저: mount -a / mount -t nfs ...)"
+    fi
+
     # ---- Suprema 얼굴 SDK 라이선스: 활성화 원본을 컨테이너 $HOME 경로에 read-only 마운트 ----
     # SDK 는 실행 사용자의 $HOME/.local/share/data/bconf/data.conf 를 읽는다. 컨테이너 홈은
     # 호스트 홈 bind 이므로, 그 아래에 nested single-file bind 로 활성화 원본을 얹는다.
@@ -268,6 +282,7 @@ else
         -v "$WEIGHTS_DIR":/weights \
         -v "$LIBS_DIR":/libs:ro \
         "${DATASET_MOUNT[@]}" \
+        "${NAS_MOUNT[@]}" \
         "${FACE_LICENSE_MOUNT[@]}" \
         "${FACE_ENDPOINT_ENV[@]}" \
         -w "/home/${USERNAME}/work" \
@@ -326,7 +341,7 @@ cat <<EOF
 
 할당: GPU=${GPU_DEVICES} · CPU=${CPUS} · MEM=${MEMORY} · 기본그룹=${MLTEAM_GROUP} · sshd포트=${SSH_PORT} · net=${DEVNET}(사설망·호스트 차단/인터넷 허용) · egress=${EGRESS_NETWORK:-(없음)}
 ※ 얼굴 SDK(QFE) 쓰면 devnet 방화벽에 호스트 포트 허용 필요: ALLOW_HOST_PORTS="18080" sudo ./scripts/devnet_firewall.sh up
-마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro) · face-license=~/${FACE_LICENSE_REL}(ro)
+마운트: 홈=${HOME_DIR} · weights=/weights(mlteam rw) · libs=/libs(ro) · datasets=/datasets(ro) · nas=/mnt/nas192(ro, 호스트 ${NAS_DIR} 마운트 시) · face-license=~/${FACE_LICENSE_REL}(ro)
 얼굴 SDK: SUPREMA_ENDPOINT=${SUPREMA_ENDPOINT_URL:-(미설정)} ← 42 호스트 qfe_http_server 주소(docs/suprema-license-sharing.md §실행계획)
 ※ README 의 GPU·포트 대장에 GPU=${GPU_DEVICES}, sshd=${SSH_PORT} 를 기록할 것.
 EOF
