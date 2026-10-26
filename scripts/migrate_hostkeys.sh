@@ -32,6 +32,10 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# root 레인의 docker 클라이언트 상태를 호출자 홈에서 분리한다 (사유 = 그 파일 상단 주석).
+# shellcheck source=_root_docker_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_root_docker_env.sh"
+
 # 대상 컨테이너 목록
 if [[ $# -gt 0 ]]; then
     CONTAINERS=("$@")
