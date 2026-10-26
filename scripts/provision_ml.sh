@@ -82,6 +82,10 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# root 레인의 docker 클라이언트 상태를 호출자 홈에서 분리한다 (사유 = 그 파일 상단 주석).
+# shellcheck source=_root_docker_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_root_docker_env.sh"
+
 if [[ $# -lt 2 || $# -gt 3 ]]; then
     echo "usage: sudo $0 <username> <pubkey-file> [gpu-devices]" >&2
     echo "  gpu-devices 생략 시 전체 GPU 공유(--gpus all)" >&2

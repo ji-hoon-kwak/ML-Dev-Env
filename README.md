@@ -23,6 +23,7 @@ docker/
   sshd_config_42dev.conf # ⭐ 컨테이너 sshd 설정(키 인증만 · 직결 접속)
   devstores.sh          # ⭐ 컨테이너 안 개인 PG/Redis(로컬 프로세스) — /usr/local/bin/devstores
 scripts/
+  _root_docker_env.sh   # ⭐ root 실행 공통: DOCKER_CONFIG 를 root 홈으로 고정(호출자 ~/.docker 오염 방지)
   build_ml_base.sh      # pia/ml-base 빌드 (AI · 최초 1회 / environment.ml.yml 변경 시)
   build_pf_base.sh      # pia/pf-base 빌드 (플랫폼 · 최초 1회 / requirements.pf.txt 변경 시)
   provision_ml.sh       # AI(ml-) 온보딩: 계정 + GPU 컨테이너 + 컨테이너 sshd 포트 노출
@@ -129,6 +130,31 @@ sudo ./scripts/provision_ml.sh <user> keys/<user>.pub 0
   있다. 지워져도 다음 발급 때 자동 재빌드되지만(레이어 캐시 있으면 빠름), 되도록 남길 것.
 - 개발자는 자기 컨테이너 안에서 `pip install`·`conda install` 가능(conda 트리가
   mlteam group-writable). copy-on-write 라 다른 개발자 컨테이너엔 영향 없다.
+
+### root 스크립트는 호출자의 `~/.docker` 를 건드리지 않는다
+
+이 리포의 스크립트는 전부 root 로 돈다(useradd · ssh 키 · nologin · 컨테이너 sshd).
+그런데 **Ubuntu sudo 는 `HOME` 을 보존**하므로, 그냥 두면 `sudo ./scripts/provision_ml.sh`
+안의 `docker build` 가 **admin 홈에 root 소유 파일**을 남긴다. docker 신버전은 빌드마다
+`~/.docker/buildx/activity/<builder>` 를 갱신하므로, 그 뒤 같은 admin 의 **non-root** 빌드가
+`ERROR: open /home/<admin>/.docker/buildx/activity/default: permission denied` 로 전부 죽는다.
+
+> 2026-10-26 실제 사건 — 02:37 의 `sudo ./scripts/provision_ml.sh <user> keys/<user>.pub` 가
+> `/home/gpuadmin/.docker/buildx/activity/default` 를 root 소유로 만들었고, 05:54 에
+> 서비스 배포(`piaspace-scope/scripts/deploy/redeploy.sh`)가 첫 빌드에서 전사했다.
+> docker CLI 를 29.x 로 올리기 전에는 그 경로 자체가 없어 **무증상**이었다.
+
+42 는 **root 레인(프로비저닝)과 non-root 레인(서비스 배포)이 구조적으로 공존**하는 호스트다.
+그래서 "레인을 하나로 통일" 이 아니라 **레인별 docker 클라이언트 상태 분리**로 푼다 —
+root 필수 스크립트는 전부 `scripts/_root_docker_env.sh` 를 source 해 `DOCKER_CONFIG` 를
+root 홈으로 고정한다(= `sudo -H` 와 같은 상태). 이미지·빌드 캐시는 daemon 쪽이라
+**발급 속도·`pia/ml-base` 재사용에는 영향이 없다.**
+
+이미 오염된 계정이 있으면(스크립트가 실행 시 경고로 알려준다) 그 계정에서 한 번:
+
+```bash
+sudo chown -R "$USER": ~/.docker
+```
 
 ### sshd 호스트 키는 이미지가 아니라 호스트에 영속화한다
 

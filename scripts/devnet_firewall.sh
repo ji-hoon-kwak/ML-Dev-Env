@@ -37,6 +37,10 @@ CMD="${1:-status}"
 
 if [[ $EUID -ne 0 ]]; then echo "ERROR: sudo 로 실행하세요." >&2; exit 1; fi
 
+# root 레인의 docker 클라이언트 상태를 호출자 홈에서 분리한다 (사유 = 그 파일 상단 주석).
+# shellcheck source=_root_docker_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_root_docker_env.sh"
+
 ensure_net() {
     if docker network inspect "$DEVNET" &>/dev/null; then
         echo "[skip] docker network '$DEVNET' 이미 존재"

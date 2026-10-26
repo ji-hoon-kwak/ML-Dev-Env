@@ -17,6 +17,10 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# root 레인의 docker 클라이언트 상태를 호출자 홈에서 분리한다 (사유 = 그 파일 상단 주석).
+# shellcheck source=_root_docker_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_root_docker_env.sh"
+
 # 호스트 mlteam GID 에 맞춘다(있으면 그 값, 없으면 기본값으로 그룹 생성).
 if getent group "$MLTEAM_GROUP" >/dev/null; then
     MLTEAM_GID="$(getent group "$MLTEAM_GROUP" | cut -d: -f3)"
