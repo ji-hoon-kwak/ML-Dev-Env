@@ -39,7 +39,22 @@ FACE_LICENSE_REL=".local/share/data/bconf/data.conf"                 # 컨테이
 #    주입 생략(identity off — 추적은 계속). 아래 docker run 이 --add-host 로 host.docker.internal 매핑.
 #    배경·실행순서 = docs/suprema-license-sharing.md §실행계획.
 SUPREMA_ENDPOINT_URL="${SUPREMA_ENDPOINT_URL:-http://host.docker.internal:18080}"
-LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · read-only 마운트, admin 관리)
+LIBS_DIR="/data/libs"                # 공유 AI 라이브러리 (QFE 등 · 기본 read-only 마운트, admin 관리)
+# ⭐ /libs 는 기본 ro 다 — SDK 바이너리·암호화 모델·활성화 파일을 6명이 동시에 지울 수 있게
+#    두지 않기 위해서다. 다만 호스트의 /data/libs 는 mlteam 그룹 쓰기(2775)라, "권한은 있는데
+#    컨테이너에서만 못 쓰는" 상태가 생긴다(2026-10-23 사건: 소유자 본인이 자기 디렉터리에
+#    파일을 못 넣음 — 원인은 권한이 아니라 이 ro 플래그였다).
+#    → LIBS_RW=1 로 발급하면 '작업용 하위 디렉터리만' rw 로 겹쳐 준다. 더 깊은 경로의 바인드가
+#      나중에 적용되므로 /libs 는 ro 로 남고 아래 목록만 쓰기 가능해진다.
+#    ⚠️ 제외 대상과 이유 (목록에 추가하지 말 것):
+#      qfe_http_server — systemd 가 root 로 실행하는 바이너리. 쓰기 허용 = 권한 상승 경로
+#      qfe_license · qfe_home — 활성화 파일. 동시 쓰기로 손상될 수 있다(facedb/README.md)
+#      QFE_v1.1.3     — 벤더 SDK·암호화 모델
+#    ⚠️ 컨테이너 안에서 QFE_InitSDK 는 머신 지문이 달라 -67 로 실패한다(실증). rw 로 열어도
+#      qfe_enroll 은 호스트에서 돌려야 한다. 여기서 되는 건 build_images/make_roster 같은
+#      '라이선스가 필요 없는 준비 작업'뿐이다.
+LIBS_RW="${LIBS_RW:-}"               # 1 이면 아래 하위 디렉터리를 rw 로 겹친다 (기본: 전체 ro)
+LIBS_RW_SUBDIRS="${LIBS_RW_SUBDIRS:-db facedb}"
 # ⭐ 컨테이너 sshd 호스트 키(신원)를 이미지 밖 호스트에 영속화 → 이미지 재빌드/컨테이너
 #    재발급에도 키 불변(클라이언트 known_hosts 안 깨짐). 컨테이너별 하위 디렉터리에 최초 1회 발급.
 HOSTKEYS_DIR="/data/42dev/hostkeys"
@@ -100,6 +115,15 @@ fi
 #    (authorized_keys 는 홈에 있어 컨테이너 sshd 가 읽지만, 호스트 sshd 는 nologin 으로 거절)
 if id "$USERNAME" &>/dev/null; then
     echo "[skip] 계정 $USERNAME 이미 존재"
+    # ⚠️ 이 멱등 하드닝은 '의도적으로 열어둔' 호스트 셸도 조용히 되돌린다. 2026-10-23 에
+    #    admin 이 얼굴 DB 작업을 위해 셸을 열어뒀는데, 그 뒤 재발급 한 번으로 다시 닫혀
+    #    "키는 통과하는데 This account is currently not available" 로 한참을 헤맸다.
+    #    정책(기본 nologin)은 유지하되, 덮어썼다는 사실은 드러낸다. 셸 개방은 '재발급 뒤에'.
+    CUR_SHELL="$(getent passwd "$USERNAME" | cut -d: -f7)"
+    if [[ -n "$CUR_SHELL" && "$CUR_SHELL" != "/usr/sbin/nologin" ]]; then
+        echo "[warn] $USERNAME 의 호스트 셸을 $CUR_SHELL → /usr/sbin/nologin 으로 되돌립니다." >&2
+        echo "       의도적으로 열어둔 것이면 발급 후 다시: sudo usermod -s $CUR_SHELL $USERNAME" >&2
+    fi
     usermod -g "$MLTEAM_GROUP" -s /usr/sbin/nologin "$USERNAME"   # mlteam + 호스트 nologin(멱등)
 else
     useradd -m -g "$MLTEAM_GROUP" -s /usr/sbin/nologin "$USERNAME"
@@ -252,6 +276,22 @@ else
         echo "[info] SUPREMA_ENDPOINT_URL 미설정 — 엔드포인트 주입 생략(얼굴 identity off · 추적엔 무관)"
     fi
 
+    # ---- /libs 마운트: 기본 ro, LIBS_RW=1 이면 작업용 하위만 rw 로 겹친다 ----
+    # 나중에 오는 더 깊은 경로의 바인드가 우선하므로 /libs 자체는 ro 로 남는다.
+    LIBS_MOUNT=(-v "$LIBS_DIR":/libs:ro)
+    if [[ -n "$LIBS_RW" ]]; then
+        for sub in $LIBS_RW_SUBDIRS; do
+            if [[ -d "$LIBS_DIR/$sub" ]]; then
+                LIBS_MOUNT+=(-v "$LIBS_DIR/$sub":"/libs/$sub")
+            else
+                echo "[warn] $LIBS_DIR/$sub 없음 — rw 겹치기 생략" >&2
+            fi
+        done
+        echo "[ok] /libs 기본 ro · rw 하위: $LIBS_RW_SUBDIRS"
+    else
+        echo "[info] /libs 전체 read-only (쓰기가 필요하면 LIBS_RW=1 로 재발급)"
+    fi
+
     # ---- 컨테이너 sshd 호스트 키: 최초 1회 발급 후 영구 고정 ----
     # 키를 이미지가 아니라 호스트($KEYDIR)에 두므로 이미지 재빌드·컨테이너 재발급에도
     # 신원(호스트 키)이 그대로다. 예전 base 이미지의 `ssh-keygen -A` 는 재빌드마다 새 키를
@@ -280,7 +320,7 @@ else
         -v "$KEYDIR":/etc/ssh/keys:ro \
         -v "$HOME_DIR":"/home/${USERNAME}" \
         -v "$WEIGHTS_DIR":/weights \
-        -v "$LIBS_DIR":/libs:ro \
+        "${LIBS_MOUNT[@]}" \
         "${DATASET_MOUNT[@]}" \
         "${NAS_MOUNT[@]}" \
         "${FACE_LICENSE_MOUNT[@]}" \

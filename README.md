@@ -52,7 +52,10 @@ torch/CUDA/GPU 가 필수다. 플랫폼(gateway/FE)은 모델을 안 돌리고 *
 - 환경 관리자는 **conda** (Miniforge — Anaconda 리포 상용 라이선스 이슈 회피).
   기본 env `dev` 제공, 개발자가 자기 env 추가 자유 (`/opt/conda` 본인 소유).
 - **weights 는 전 계정 공유**: 호스트 `/data/weights` → 컨테이너 `/weights` (rw).
-- **공유 AI 라이브러리**: 호스트 `/data/libs` → 컨테이너 `/libs` (**read-only**, admin 관리).
+- **공유 AI 라이브러리**: 호스트 `/data/libs` → 컨테이너 `/libs` (**기본 read-only**, admin 관리).
+  쓰기가 필요하면 `LIBS_RW=1` 로 발급 — `/libs` 는 ro 로 두고 `LIBS_RW_SUBDIRS`(기본 `db facedb`)만
+  rw 로 겹친다. ⚠️ 컨테이너에서 QFE `InitSDK` 는 머신 지문이 달라 `-67` 로 실패하므로, rw 를 열어도
+  `qfe_enroll` 은 호스트에서 돌려야 한다 → [docs/suprema-license-sharing.md §8](docs/suprema-license-sharing.md).
   개인 홈에 둔 공유 자산(예: QFE)은 여기로 옮긴다 — 홈에서 공유하면 안 된다(§ 아래).
 - **GPU 는 일단 전체 공유** (`--gpus all` 기본). 분리가 필요해지면 발급 시
   `gpu-devices` 인자로 제한 가능 — 재발급(`docker rm -f ml-<user>` 후 재실행)만 하면 됨.

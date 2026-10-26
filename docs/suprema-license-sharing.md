@@ -310,3 +310,93 @@ sudo netfilter-persistent save     # /etc/iptables/rules.v4 에 저장 (18080 3�
 - `piapf/face/suprema_adapter.py` (`resolve_endpoint`, HTTP 클라이언트)
 - ADR-023 (Suprema 어댑터 격리) · TICKET-OPS-012 (loopback/네트워크 노출)
 - `42-dev-env/scripts/provision_ml.sh`
+
+---
+
+## 8. ⭐ 2026-10-23/26 실측 — 컨테이너에서는 왜 안 되는가 (결론 확정)
+
+> 계기: 팀원 한 명이 자기 컨테이너에서 `QFE_InitSDK -> -67 QFE_ERR_LICENSE_MACHINE_CHANGED` 를
+> 보고했다. "라이선스 디렉터리 권한" 문제로 보였으나 전부 아니었다. 아래는 **실행해서 얻은
+> 결과**이고, §1~§7 의 추정 몇 개를 바로잡는다.
+
+### 8.1 진짜 원인은 둘이었고 서로 무관했다
+
+| # | 증상 | 원인 | 조치 |
+|---|---|---|---|
+| ① | 컨테이너에서 `/identify` 가 **timeout** | **devnet → 호스트 18080 차단**. `INPUT` 의 `-s 172.31.0.0/16 -j DROP`(9/3 격리 개편)이 그 아래 OPS-012 의 `172.16.0.0/12 → 18080 ACCEPT`(8/20)를 **가렸다**. `devnet_firewall.sh` 의 `ALLOW_HOST_PORTS=18080` 예외가 빠진 채 적용돼 있었다 | `sudo ALLOW_HOST_PORTS="18080" ./scripts/devnet_firewall.sh up` |
+| ② | `qfe_setup` 이 `-67` | **컨테이너 머신 지문 ≠ 호스트**. 권한·계정·파일 신선도 전부 무죄 | 컨테이너에서는 **HTTP 만** 쓴다 |
+
+①은 9/30 이후 **dev 컨테이너 6개 전부**가 같은 상태였다. 아무도 `/identify` 를 부르지 않아 두
+주 넘게 드러나지 않았다(소비자인 `trace-worker` 는 compose 네트워크라 규칙 밖).
+
+⚠️ `/etc/iptables/rules.v4` 가 **8/28 파일**이다 — devnet(9/3)보다 앞선다. 즉 **재부팅하면
+devnet 격리가 아예 없는 상태로 올라오고**, 누군가 손으로 스크립트를 돌릴 때까지 dev 컨테이너가
+호스트·사설망에 무제한 접근한다. 부팅 훅(`devnet-firewall.service`)이 필요하다.
+
+### 8.2 `-67` 의 축 분리 (통제 실험)
+
+같은 머신·같은 바이너리·**같은 파일**로 세 번 실행했다:
+
+| 실행 위치 | 계정 | `data.conf` | 결과 |
+|---|---|---|---|
+| 호스트 | `gpuadmin` | `b993edc9` (본인) | **`InitSDK -> 0`** · max 4 |
+| 호스트 | `dhkim` (`sudo -u`) | `78f7a093` (본인) | **`InitSDK -> 0`** · max 4 |
+| **컨테이너** | 임시계정 | **`b993edc9`** ← 호스트에서 방금 0 난 바로 그 파일 | **`-67`** |
+
+- ✅ **계정 축 무죄** — 다른 UID 에서도 통과. **Cryptlex 지문에 계정 정보는 들어가지 않는다.**
+  `/data/libs/facedb/README.md` 가 *"남은 불확실성 하나"* 로 열어둔 질문이 **해소**됐다.
+- ✅ **공유본 신선도 무죄** — `share_license.sh export` 로 갱신한 뒤에도 컨테이너는 `-67`.
+- 🔴 **컨테이너 축 유죄** — 확정. §TL;DR 의 *"컨테이너 안 InitSDK 는 실패한다"* 는 **결론은 맞았고
+  이유가 틀렸다**(`-5` 가 아니라 `-67`, 노드락 일반이 아니라 **머신 지문**).
+
+⇒ **컨테이너는 영원히 HTTP 클라이언트다.** 지문을 고정하고 재활성화하면 되지만, 활성화
+슬롯이 **1개**라(`facedb/README.md`) 그 길은 막혀 있다.
+
+### 8.3 같이 드러난 함정 넷
+
+1. **`qfe_setup --check` 는 읽기 전용이 아니다.** 실행하면 `data.conf` 를 다시 쓴다(mtime 갱신 확인).
+   8/19 에 공유 경로에 빈 스켈레톤을 만든 전력도 같은 이유다. **실행 전 백업**:
+   `sudo tar czf /root/bconf-backup-$(date +%F).tgz /home/*/.local/share/data/bconf/`
+2. **single-file bind 는 inode 를 고정한다.** `share_license.sh export` 로 호스트 파일을 갈아도
+   **돌고 있는 컨테이너에는 반영되지 않는다**(링크 수 0 인 좀비 inode 를 계속 본다). 재발급해야 한다.
+3. **`qfe_license/env.sh` 가 `/data/libs` 를 하드코딩**한다 → 컨테이너(`/libs`)에서 `source` 하면
+   `libQFE_SDK.so: cannot open shared object file`. 컨테이너에서는 `QFE_ROOT=/libs/...` 로 직접 export.
+4. **0바이트 `data.conf` 는 활성화본이 아니다.** `root:root 0` 짜리는 Docker 가 bind-mount 대상으로
+   만든 **빈 스텁**이다(mtime = 컨테이너 발급일). 실제 개인 활성화본은 15240B 짜리뿐.
+
+### 8.4 접근 경로 — 8/19 모델과 9/3 모델의 충돌
+
+`facedb/README.md`(8/19)는 **"각자 호스트 계정으로 들어와 mlteam 그룹 쓰기로 공유"** 를 전제로
+쓰였다. 9/3 격리 개편이 그 전제를 제거했다 — **호스트 셸 `nologin` + `/libs:ro`**. 권한(2775
+mlteam)은 그대로 남아 **"권한은 있는데 닿을 길이 없는"** 상태가 됐고, 두 달간 아무도 부딪히지
+않다가 이번에 드러났다.
+
+- 호스트 작업이 필요하면 **한시 개방**: `sudo usermod -s /bin/bash <user>` → 작업 후 원복.
+  ⚠️ **재발급이 이걸 되돌린다**(`provision_ml.sh` 의 멱등 하드닝) — **셸 개방은 재발급 뒤에.**
+  이제 스크립트가 덮어쓸 때 `[warn]` 을 찍는다.
+- 컨테이너에서 공유 트리에 써야 하면 **`LIBS_RW=1`** 로 발급 — `/libs` 는 ro 로 두고
+  `LIBS_RW_SUBDIRS`(기본 `db facedb`)만 rw 로 겹친다.
+  제외: `qfe_http_server`(systemd 실행 바이너리=권한 상승) · `qfe_license`·`qfe_home`(활성화 파일
+  동시 쓰기 손상) · `QFE_v1.1.3`(벤더 SDK).
+  ```bash
+  docker rm -f ml-<user>
+  sudo -E env LIBS_RW=1 SSH_PORT=<기존포트> ./scripts/provision_ml.sh <user> keys/<user>.pub
+  # 로그에 "[ok] /libs 기본 ro · rw 하위: db facedb" 가 떠야 한다
+  ```
+- ⚠️ rw 로 열어도 **`qfe_enroll` 은 컨테이너에서 못 돈다**(8.2). 등록 한 단계는 호스트다.
+
+### 8.5 권장 작업 모양
+
+> **준비는 컨테이너(홈 `~/work`, rw) → 반영은 호스트(`/data/libs/...`) → 등록은 호스트.**
+
+홈은 호스트와 양방향 공유(`-v $HOME_DIR:/home/<user>`)이므로 `docker cp` 조차 필요 없다.
+`/data/libs` 를 ro 로 지키면서도 작업이 끝난다. 얼굴 데이터셋 도구 일체(`db_tools/pylibs` 로컬
+wheel · `env.sh` 절대경로 · `qfe_enroll` 라이선스)가 **원래 호스트 실행 전제**로 만들어져 있다.
+
+### 8.6 남은 과제
+
+- [ ] `devnet-firewall.service` (부팅 훅) — 없으면 재부팅마다 ①이 재발하고 격리도 함께 풀린다
+- [ ] `provision_ml.sh` 의 `FACE_LICENSE_MOUNT`(`data.conf` ro 바인드) **제거 검토** — 컨테이너에서
+      SDK 가 못 도는 게 확정됐으므로 오해만 재생산한다(§5 가 예고한 제거가 아직 안 됐다)
+- [ ] 벤더 문의 — 활성화 슬롯 총량 · 재활성화 절차 · 유휴 활성화 해제 (PoC 전 필수)
+- [ ] `/data/libs/facedb/README.md` 에 §8.2·§8.4 반영 (그 문서가 운영 정본인데 버전관리 밖에 있다)
